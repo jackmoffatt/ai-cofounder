@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Square } from "lucide-react";
 import { useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "@/lib/cn";
 
@@ -13,15 +13,20 @@ export function ChatInput({
   disabled,
   placeholder = "Ask your startup agent…",
   autoFocus,
+  streaming,
+  onStop,
 }: {
   onSend: (text: string) => void;
   disabled?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
+  /** While true the send button becomes a stop button. */
+  streaming?: boolean;
+  onStop?: () => void;
 }) {
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
-  const canSend = value.trim().length > 0 && !disabled;
+  const canSend = value.trim().length > 0 && !disabled && !streaming;
 
   function resize() {
     const el = ref.current;
@@ -65,14 +70,24 @@ export function ChatInput({
         onKeyDown={onKeyDown}
         className="max-h-[220px] min-h-8 flex-1 resize-none bg-transparent py-1.5 text-[length:var(--fs-chat)] leading-snug text-fg placeholder:text-muted focus:outline-none"
       />
-      <button
-        onClick={submit}
-        disabled={!canSend}
-        aria-label="Send message"
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg transition-opacity duration-[var(--dur-fast)] disabled:opacity-25"
-      >
-        <ArrowUp size={16} strokeWidth={2.25} />
-      </button>
+      {streaming ? (
+        <button
+          onClick={onStop}
+          aria-label="Stop generating"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-fg text-bg"
+        >
+          <Square size={12} fill="currentColor" />
+        </button>
+      ) : (
+        <button
+          onClick={submit}
+          disabled={!canSend}
+          aria-label="Send message"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg transition-opacity duration-[var(--dur-fast)] disabled:opacity-25"
+        >
+          <ArrowUp size={16} strokeWidth={2.25} />
+        </button>
+      )}
     </div>
   );
 }

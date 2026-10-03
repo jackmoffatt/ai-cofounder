@@ -28,7 +28,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             !desktopOpen && "md:invisible md:w-0",
           )}
         >
-          <Sidebar onNewChat={() => undefined} />
+          <Sidebar onNavigate={() => setMobileOpen(false)} />
         </aside>
 
         {mobileOpen && (
