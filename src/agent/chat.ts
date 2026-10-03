@@ -7,11 +7,15 @@ import {
   mergeMessageMetadata,
   renameConversation,
 } from "@/db/queries/conversations";
-import { applyFounderCandidates, readFounder } from "@/services/memory/founder";
+import { getProposalRows } from "@/db/queries/memory";
+import { readFounder } from "@/services/memory/founder";
+import { ingestCandidates } from "@/services/memory/ingest";
+import { readActiveStartup } from "@/services/memory/startup";
+import { toCard, type ProposalCard } from "@/services/memory/view";
 import { modelFor } from "@/services/ai/models";
 import { AIError, type AIProvider, type ChatMessage } from "@/services/ai/types";
 import { buildSystemPrompt } from "./contextBuilder";
-import { extractFounderFacts } from "./extraction";
+import { extractMemory } from "./extraction";
 import { fallbackTitle, generateTitle } from "./title";
 
 /** Events streamed to the client for one turn. */
@@ -21,6 +25,7 @@ export type TurnEvent =
   | { type: "title"; title: string }
   | { type: "status"; text: string }
   | { type: "memory"; changes: MemoryChange[] }
+  | { type: "proposals"; proposals: ProposalCard[] }
   | { type: "done"; messageId: string }
   | { type: "error"; code: string; message: string };
 
@@ -29,6 +34,8 @@ export interface MemoryChange {
   eventId: string;
   summary: string;
   reason: string;
+  /** Set when the change created or touched a memory item, so the UI can link to it. */
+  itemId?: string;
 }
 
 export interface TurnInput {
@@ -125,22 +132,42 @@ export async function* runChatTurn(
   if (userMessage) {
     yield { type: "status", text: "Updating memory…" };
     const known = readFounder(db);
-    const candidates = await extractFounderFacts(provider, {
+    const previousReply = stored.filter((m) => m.role === "assistant").at(-1)?.content ?? null;
+    const { extraction, codes } = await extractMemory(provider, {
+      db,
       userMessage: userMessage.content,
+      lastAssistantMessage: previousReply,
       knownName: known.name,
       knownProfile: known.profile,
+      startup: readActiveStartup(db),
     });
-    const events = applyFounderCandidates(db, candidates, {
+    const { events, proposals } = ingestCandidates(db, extraction, codes, {
       conversationId: conversation.id,
       messageId: userMessage.id,
     });
+
+    // Attach to the reply (or the user's message if there was none) so the notes survive reloads.
+    const anchor = messageId ?? userMessage.id;
+    if (events.length || proposals.length) {
+      mergeMessageMetadata(db, anchor, { memory: events.map((e) => e.id), proposals: proposals.map((p) => p.id) });
+    }
     if (events.length) {
-      // Attach to the reply (or the user's message if there was none) so the note survives reloads.
-      mergeMessageMetadata(db, messageId ?? userMessage.id, { memory: events.map((e) => e.id) });
       yield {
         type: "memory",
-        changes: events.map((e) => ({ eventId: e.id, summary: e.summary, reason: e.reason })),
+        changes: events.map((e) => ({
+          eventId: e.id,
+          summary: e.summary,
+          reason: e.reason,
+          itemId: (JSON.parse(e.change) as { itemId?: string }).itemId,
+        })),
+      };
+    }
+    if (proposals.length) {
+      yield {
+        type: "proposals",
+        proposals: getProposalRows(db, proposals.map((p) => p.id)).map(toCard),
       };
     }
   }
 }
+

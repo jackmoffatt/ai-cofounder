@@ -1,4 +1,6 @@
 import { Markdown } from "./Markdown";
+import { ProposalCardView } from "@/components/memory/ProposalCardView";
+import type { ProposalCard } from "@/services/memory/view";
 import { MemoryNotes, type MemoryNote } from "./MemoryNotes";
 
 export interface ChatItem {
@@ -6,6 +8,7 @@ export interface ChatItem {
   role: "user" | "assistant";
   content: string;
   notes?: MemoryNote[];
+  proposals?: ProposalCard[];
 }
 
 /** Document-style: user turns are a quiet tinted block, assistant turns are plain prose. */
@@ -17,6 +20,7 @@ export function Message({ item, pending }: { item: ChatItem; pending?: boolean }
           {item.content}
         </p>
         {item.notes && <MemoryNotes notes={item.notes} />}
+        {item.proposals?.map((p) => <ProposalCardView key={p.id} proposal={p} />)}
       </div>
     );
   }
@@ -25,6 +29,7 @@ export function Message({ item, pending }: { item: ChatItem; pending?: boolean }
       {item.content ? <Markdown>{item.content}</Markdown> : null}
       {pending && !item.content && <span className="text-sm text-muted animate-pulse">Thinking…</span>}
       {item.notes && <MemoryNotes notes={item.notes} />}
+      {item.proposals?.map((p) => <ProposalCardView key={p.id} proposal={p} />)}
     </div>
   );
 }

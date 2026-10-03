@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { notifyConversationsChanged, streamChat } from "@/lib/chatClient";
+import { notifyMemoryChanged } from "@/lib/memoryClient";
 import { ChatInput } from "@/components/ui/ChatInput";
 import { Button } from "@/components/ui/Button";
 import { Message, type ChatItem } from "./Message";
@@ -96,6 +97,15 @@ export function ChatView({ conversationId, initialMessages }: Props) {
                   const notes = e.changes.map((c) => ({ ...c, undone: false }));
                   return prev.map((it) => (it === target ? { ...it, notes: [...(it.notes ?? []), ...notes] } : it));
                 });
+                notifyMemoryChanged();
+                break;
+              case "proposals":
+                setItems((prev) => {
+                  const reply = prev.find((it) => it.id === assistantId);
+                  const target = reply?.content ? reply : [...prev].reverse().find((it) => it.role === "user");
+                  return prev.map((it) => (it === target ? { ...it, proposals: [...(it.proposals ?? []), ...e.proposals] } : it));
+                });
+                notifyMemoryChanged();
                 break;
               case "error":
                 failed = true;

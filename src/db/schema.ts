@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /** Single-user for now: every row carries an owner so auth/multi-user isn't blocked later. */
 export const LOCAL_OWNER = "local";
@@ -81,3 +81,80 @@ export const memoryEvents = sqliteTable(
 export type Founder = typeof founder.$inferSelect;
 export type Startup = typeof startups.$inferSelect;
 export type MemoryEvent = typeof memoryEvents.$inferSelect;
+
+/**
+ * One table for the knowledge kinds that share a lifecycle: assumptions, decisions, questions, ideas,
+ * customer insights, notes. Kind-specific extras live in `data` JSON. Soft-deleted via deletedAt.
+ */
+export const memoryItems = sqliteTable(
+  "memory_items",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().default(LOCAL_OWNER),
+    /** Null until an idea becomes an established startup. */
+    startupId: text("startup_id"),
+    kind: text("kind", { enum: ["assumption", "decision", "question", "idea", "insight", "note"] }).notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull().default(""),
+    /** Vocabulary depends on kind; validated in services/memory/items.ts. */
+    status: text("status").notNull(),
+    confidence: text("confidence", { enum: ["low", "medium", "high"] }).notNull().default("low"),
+    importance: integer("importance").notNull().default(3),
+    /** JSON, kind-specific: decision reasoning/alternatives, assumption category, question method, etc. */
+    data: text("data").notNull().default(sql`'{}'`),
+    origin: text("origin", { enum: ["conversation", "manual", "research", "import"] }).notNull(),
+    /** JSON, e.g. { conversationId, messageId, quote }. */
+    originRef: text("origin_ref").notNull().default(sql`'{}'`),
+    createdBy: text("created_by", { enum: ["user", "agent"] }).notNull(),
+    supersedesId: text("supersedes_id"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    deletedAt: text("deleted_at"),
+  },
+  (t) => [index("memory_items_kind_idx").on(t.kind, t.status)],
+);
+
+/** What supports or weakens an item. Assumption status and confidence are derived from these in code. */
+export const evidence = sqliteTable(
+  "evidence",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => memoryItems.id, { onDelete: "cascade" }),
+    stance: text("stance", { enum: ["supports", "weakens"] }).notNull(),
+    strength: text("strength", { enum: ["anecdotal", "moderate", "strong"] }).notNull(),
+    /** What was observed, in the founder's words where possible. */
+    excerpt: text("excerpt").notNull(),
+    origin: text("origin", { enum: ["conversation", "manual", "research"] }).notNull(),
+    originRef: text("origin_ref").notNull().default(sql`'{}'`),
+    createdBy: text("created_by", { enum: ["user", "agent"] }).notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("evidence_item_idx").on(t.itemId)],
+);
+
+/** Changes the agent suggests but must not make itself: anything that alters the company's direction. */
+export const proposals = sqliteTable(
+  "proposals",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().default(LOCAL_OWNER),
+    /** startup_field | stage | objective | assumption_status | decision_supersede */
+    type: text("type").notNull(),
+    /** JSON payload for that type. */
+    change: text("change").notNull(),
+    /** One-line human description, e.g. "Change target customer to bootcamp students". */
+    summary: text("summary").notNull(),
+    rationale: text("rationale").notNull().default(""),
+    status: text("status", { enum: ["pending", "accepted", "rejected"] }).notNull().default("pending"),
+    originRef: text("origin_ref").notNull().default(sql`'{}'`),
+    createdAt: text("created_at").notNull(),
+    decidedAt: text("decided_at"),
+  },
+  (t) => [index("proposals_status_idx").on(t.status)],
+);
+
+export type MemoryItem = typeof memoryItems.$inferSelect;
+export type Evidence = typeof evidence.$inferSelect;
+export type Proposal = typeof proposals.$inferSelect;

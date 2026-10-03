@@ -4,11 +4,12 @@ vi.mock("server-only", () => ({}));
 
 import { runChatTurn, type TurnEvent } from "@/agent/chat";
 import { buildSystemPrompt } from "@/agent/contextBuilder";
-import { extractFounderFacts } from "@/agent/extraction";
+import { emptyExtraction, extractMemory, type Extraction } from "@/agent/extraction";
 import { createDb, type Db } from "@/db/client";
 import { listMessages } from "@/db/queries/conversations";
 import { getEvent } from "@/db/queries/profile";
 import { FakeProvider } from "@/services/ai/fake";
+import { addEvidence, createItem, deleteItem } from "@/services/memory/items";
 import { readFounder, saveFounderEdit, undoFounderEvent } from "@/services/memory/founder";
 import { establishStartup, saveStartupEdit } from "@/services/memory/startup";
 
@@ -63,40 +64,70 @@ describe("buildSystemPrompt", () => {
   });
 });
 
-describe("extractFounderFacts", () => {
-  const input = { userMessage: "I'm Jack and I write Python daily.", knownName: null, knownProfile: {} };
+const X = (p: Partial<Extraction>): Extraction => ({ ...emptyExtraction(), ...p });
+const founderExt = (field: string, value: string, quote: string) =>
+  X({ founder: [{ field: field as never, value, quote }] });
 
-  it("keeps updates whose evidence is quoted from the message and drops the rest", async () => {
+describe("memory in the prompt", () => {
+  it("lists assumptions with their epistemic status, and omits closed or deleted items", () => {
+    const { item } = createItem(db, { kind: "assumption", title: "Students struggle", origin: "manual", createdBy: "user" });
+    createItem(db, { kind: "decision", title: "Target seniors", origin: "manual", createdBy: "user" });
+    const { item: gone } = createItem(db, { kind: "idea", title: "Dropped idea", origin: "manual", createdBy: "user" });
+    deleteItem(db, gone.id);
+    addEvidence(db, { itemId: item.id, stance: "supports", strength: "anecdotal", excerpt: "one student said so", origin: "manual", createdBy: "user" });
+
+    const p = buildSystemPrompt(db);
+    expect(p).toContain("- Students struggle [testing, low confidence, 1 piece of evidence]");
+    expect(p).toContain("Decisions:\n- Target seniors");
+    expect(p).not.toContain("Dropped idea");
+    expect(p).toContain("not a fact");
+  });
+
+  it("adds nothing when memory is empty", () => {
+    expect(buildSystemPrompt(db)).not.toContain("What we have recorded so far");
+  });
+});
+
+describe("extractMemory", () => {
+  const ctx = (userMessage: string) => ({
+    db,
+    userMessage,
+    lastAssistantMessage: null,
+    knownName: null,
+    knownProfile: {},
+    startup: null,
+  });
+
+  it("keeps updates whose quote is in the message and drops the rest", async () => {
     const provider = new FakeProvider({
-      structuredResult: {
-        updates: [
-          { field: "skills", value: "writes Python daily", evidence: "I write Python daily" },
-          { field: "skills", value: "expert in Rust", evidence: "I am a Rust expert" },
-          { field: "name", value: "Jack", evidence: "I'm Jack" },
+      structuredResult: X({
+        founder: [
+          { field: "skills", value: "writes Python daily", quote: "I write Python daily" },
+          { field: "skills", value: "expert in Rust", quote: "I am a Rust expert" },
+          { field: "name", value: "Jack", quote: "I'm Jack" },
         ],
-      },
+      }),
     });
-    const out = await extractFounderFacts(provider, input);
-    expect(out.map((u) => u.value)).toEqual(["writes Python daily", "Jack"]);
+    const { extraction } = await extractMemory(provider, ctx("I'm Jack and I write Python daily."));
+    expect(extraction.founder.map((u) => u.value)).toEqual(["writes Python daily", "Jack"]);
   });
 
   it("returns nothing, without throwing, when the provider fails", async () => {
     const provider = new FakeProvider({ failWith: new Error("boom") });
-    expect(await extractFounderFacts(provider, input)).toEqual([]);
+    const { extraction } = await extractMemory(provider, ctx("hello"));
+    expect(extraction).toEqual(emptyExtraction());
   });
 
   it("tells the model what is already known so it can skip it", async () => {
-    const provider = new FakeProvider();
-    await extractFounderFacts(provider, { ...input, knownName: "Jack", knownProfile: { skills: ["SQL"] } });
+    const provider = new FakeProvider({ structuredResult: emptyExtraction() });
+    await extractMemory(provider, { ...ctx("hi"), knownName: "Jack", knownProfile: { skills: ["SQL"] } });
     expect(provider.requests[0].messages[0].content).toContain("skills: SQL");
     expect(provider.requests[0].messages[0].content).toContain("name: Jack");
   });
 });
 
 describe("chat turn with memory", () => {
-  const structuredResult = {
-    updates: [{ field: "constraints", value: "10 hours a week", evidence: "only have 10 hours a week" }],
-  };
+  const structuredResult = founderExt("constraints", "10 hours a week", "only have 10 hours a week");
 
   it("saves founder facts, reports them, and persists a note on the reply", async () => {
     const provider = new FakeProvider({ structuredResult });

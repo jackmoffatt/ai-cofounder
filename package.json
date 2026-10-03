@@ -8,7 +8,8 @@
     "start": "next start -H 127.0.0.1",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval": "node --env-file-if-exists=.env.local ./node_modules/vitest/vitest.mjs run --config vitest.eval.config.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

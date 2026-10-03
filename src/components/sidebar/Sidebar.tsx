@@ -7,8 +7,9 @@ import { NavigationItem } from "@/components/ui/NavigationItem";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { IconButton } from "@/components/ui/IconButton";
 import { groupByDay, useConversations, type ConversationSummary } from "@/lib/useConversations";
+import { usePendingProposals } from "@/lib/usePendingProposals";
 
-const sections = ["Memory", "Research", "Tasks", "Decisions"]; // enabled as their milestones land
+const sections = ["Research", "Tasks", "Decisions"]; // enabled as their milestones land
 
 function ConversationGroup({
   label,
@@ -51,6 +52,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const [query, setQuery] = useState("");
   const { items, remove } = useConversations(query.trim());
+  const pending = usePendingProposals();
   const activeId = pathname.startsWith("/c/") ? pathname.slice(3) : null;
   const { today, previous } = groupByDay(items);
 
@@ -100,6 +102,13 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <div className="space-y-1 border-t border-line pt-3">
         <NavigationItem onClick={() => open("/startup")} active={pathname === "/startup"}>
           Startup
+        </NavigationItem>
+        <NavigationItem
+          onClick={() => open("/memory")}
+          active={pathname === "/memory"}
+          trailing={pending > 0 ? <span aria-label={`${pending} suggested changes`} className="size-1.5 rounded-full bg-accent" /> : undefined}
+        >
+          Memory
         </NavigationItem>
         {sections.map((name) => (
           <NavigationItem key={name} disabled>
