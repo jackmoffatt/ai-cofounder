@@ -77,6 +77,22 @@ export function addMessage(
   return row;
 }
 
+/** Merges keys into a message's metadata JSON. */
+export function mergeMessageMetadata(db: Db, messageId: string, patch: Record<string, unknown>): void {
+  const row = db.select().from(messages).where(eq(messages.id, messageId)).get();
+  if (!row) return;
+  let current: Record<string, unknown> = {};
+  try {
+    current = JSON.parse(row.metadata);
+  } catch {
+    /* keep empty */
+  }
+  db.update(messages)
+    .set({ metadata: JSON.stringify({ ...current, ...patch }) })
+    .where(eq(messages.id, messageId))
+    .run();
+}
+
 /** Turns free text into a safe FTS5 prefix query: each word quoted, last word prefix-matched. */
 export function toFtsQuery(input: string): string | null {
   const words = input

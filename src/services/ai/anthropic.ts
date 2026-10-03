@@ -1,4 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import type { ZodType } from "zod";
 import { AIError, type AIProvider, type ChatEvent, type ChatRequest, type StopReason, type Usage } from "./types";
 
 function mapStopReason(reason: string | null | undefined): StopReason {
@@ -75,6 +77,28 @@ export class AnthropicProvider implements AIProvider {
       );
       const text = res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
       return { text, usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens } };
+    } catch (err) {
+      throw mapError(err);
+    }
+  }
+
+  async structured<T>(req: ChatRequest, schema: ZodType<T>): Promise<{ data: T; usage: Usage }> {
+    try {
+      const res = await this.getClient().messages.parse(
+        {
+          model: req.model,
+          max_tokens: req.maxTokens,
+          system: req.system,
+          messages: req.messages,
+          output_config: { format: zodOutputFormat(schema as never), ...(req.effort ? { effort: req.effort } : {}) },
+        },
+        { signal: req.signal },
+      );
+      if (res.parsed_output == null) throw new AIError("unknown");
+      return {
+        data: res.parsed_output as T,
+        usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens },
+      };
     } catch (err) {
       throw mapError(err);
     }

@@ -4,11 +4,14 @@ import {
   createConversation,
   getConversation,
   listMessages,
+  mergeMessageMetadata,
   renameConversation,
 } from "@/db/queries/conversations";
+import { applyFounderCandidates, readFounder } from "@/services/memory/founder";
 import { modelFor } from "@/services/ai/models";
 import { AIError, type AIProvider, type ChatMessage } from "@/services/ai/types";
-import { SYSTEM_PROMPT } from "./systemPrompt";
+import { buildSystemPrompt } from "./contextBuilder";
+import { extractFounderFacts } from "./extraction";
 import { fallbackTitle, generateTitle } from "./title";
 
 /** Events streamed to the client for one turn. */
@@ -16,8 +19,17 @@ export type TurnEvent =
   | { type: "meta"; conversationId: string; isNew: boolean }
   | { type: "delta"; text: string }
   | { type: "title"; title: string }
+  | { type: "status"; text: string }
+  | { type: "memory"; changes: MemoryChange[] }
   | { type: "done"; messageId: string }
   | { type: "error"; code: string; message: string };
+
+/** A memory write made during a turn, shown to the user with a way to undo it. */
+export interface MemoryChange {
+  eventId: string;
+  summary: string;
+  reason: string;
+}
 
 export interface TurnInput {
   /** Existing conversation, or omit to start one. */
@@ -54,8 +66,10 @@ export async function* runChatTurn(
   }
   conversation ??= createConversation(db, DEFAULT_TITLE);
 
+  let userMessage: { id: string; content: string } | null = null;
   if (input.message) {
-    addMessage(db, conversation.id, "user", input.message);
+    const row = addMessage(db, conversation.id, "user", input.message);
+    userMessage = { id: row.id, content: row.content };
   } else if (listMessages(db, conversation.id).at(-1)?.role !== "user") {
     yield { type: "error", code: "bad_request", message: "Nothing to retry." };
     return;
@@ -73,7 +87,7 @@ export async function* runChatTurn(
   try {
     for await (const ev of provider.stream({
       model: modelFor("chat"),
-      system: SYSTEM_PROMPT,
+      system: buildSystemPrompt(db),
       messages: history,
       maxTokens: 32000,
       effort: "medium",
@@ -97,16 +111,36 @@ export async function* runChatTurn(
     messageId = addMessage(db, conversation.id, "assistant", text, failure ? { ...meta, interrupted: true } : meta).id;
   }
 
-  if (conversation.title === DEFAULT_TITLE && !input.signal?.aborted) {
+  // Tell the client the reply is complete first; housekeeping below can take a second or two.
+  if (failure && failure.code !== "aborted") yield errorEvent(failure);
+  else yield { type: "done", messageId: messageId ?? "" };
+
+  if (conversation.title === DEFAULT_TITLE) {
     const firstUser = stored.find((m) => m.role === "user")?.content ?? "";
     const title = failure && !text ? fallbackTitle(firstUser) : await generateTitle(provider, firstUser);
     renameConversation(db, conversation.id, title);
     yield { type: "title", title };
   }
 
-  if (failure) {
-    yield failure.code === "aborted" ? { type: "done", messageId: messageId ?? "" } : errorEvent(failure);
-    return;
+  if (userMessage) {
+    yield { type: "status", text: "Updating memory…" };
+    const known = readFounder(db);
+    const candidates = await extractFounderFacts(provider, {
+      userMessage: userMessage.content,
+      knownName: known.name,
+      knownProfile: known.profile,
+    });
+    const events = applyFounderCandidates(db, candidates, {
+      conversationId: conversation.id,
+      messageId: userMessage.id,
+    });
+    if (events.length) {
+      // Attach to the reply (or the user's message if there was none) so the note survives reloads.
+      mergeMessageMetadata(db, messageId ?? userMessage.id, { memory: events.map((e) => e.id) });
+      yield {
+        type: "memory",
+        changes: events.map((e) => ({ eventId: e.id, summary: e.summary, reason: e.reason })),
+      };
+    }
   }
-  yield { type: "done", messageId: messageId ?? "" };
 }

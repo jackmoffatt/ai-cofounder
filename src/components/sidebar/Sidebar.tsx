@@ -8,7 +8,7 @@ import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { IconButton } from "@/components/ui/IconButton";
 import { groupByDay, useConversations, type ConversationSummary } from "@/lib/useConversations";
 
-const sections = ["Startup", "Memory", "Research", "Tasks", "Decisions"];
+const sections = ["Memory", "Research", "Tasks", "Decisions"]; // enabled as their milestones land
 
 function ConversationGroup({
   label,
@@ -98,6 +98,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <div className="space-y-1 border-t border-line pt-3">
+        <NavigationItem onClick={() => open("/startup")} active={pathname === "/startup"}>
+          Startup
+        </NavigationItem>
         {sections.map((name) => (
           <NavigationItem key={name} disabled>
             {name}

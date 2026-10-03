@@ -17,6 +17,8 @@ export interface ChatRequest {
   signal?: AbortSignal;
 }
 
+import type { ZodType } from "zod";
+
 export type StopReason = "end_turn" | "max_tokens" | "refusal" | "other";
 
 export interface Usage {
@@ -33,6 +35,8 @@ export interface AIProvider {
   stream(req: ChatRequest): AsyncIterable<ChatEvent>;
   /** Non-streaming convenience for short utility calls (titles, classification). */
   complete(req: ChatRequest): Promise<{ text: string; usage: Usage }>;
+  /** Returns output validated against `schema`. Throws AIError if the model's output doesn't conform. */
+  structured<T>(req: ChatRequest, schema: ZodType<T>): Promise<{ data: T; usage: Usage }>;
 }
 
 export type AIErrorCode =

@@ -30,7 +30,7 @@ describe("runChatTurn", () => {
     const msgs = listMessages(db, id);
     expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(msgs[1].content).toContain("Help me find an idea");
-    expect(events.at(-1)?.type).toBe("done");
+    expect(events.some((e) => e.type === "done")).toBe(true);
     expect(getConversation(db, id)?.title).toBe("Help me find an");
   });
 
@@ -62,7 +62,7 @@ describe("runChatTurn", () => {
     );
     const id = (failed[0] as { conversationId: string }).conversationId;
     const retry = await collect(runChatTurn({ db, provider: new FakeProvider() }, { conversationId: id }));
-    expect(retry.at(-1)?.type).toBe("done");
+    expect(retry.some((e) => e.type === "done")).toBe(true);
     expect(listMessages(db, id).map((m) => m.role)).toEqual(["user", "assistant"]);
   });
 

@@ -24,6 +24,7 @@ export function ChatView({ conversationId, initialMessages }: Props) {
   const [items, setItems] = useState<ChatItem[]>(initialMessages);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
 
   // Navigating between conversations remounts this component (the route segment changes), so props
   // only seed state. For a brand-new chat we learn the id mid-stream and adopt it here.
@@ -31,6 +32,8 @@ export function ChatView({ conversationId, initialMessages }: Props) {
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const activeRuns = useRef(0);
+  const pendingNav = useRef<string | null>(null);
 
   // Stop any in-flight stream when leaving.
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -43,7 +46,9 @@ export function ChatView({ conversationId, initialMessages }: Props) {
   const run = useCallback(
     async (message: string | undefined) => {
       setError(null);
+      setStatus(null);
       setStreaming(true);
+      activeRuns.current++;
       stick.current = true;
       const assistantId = `pending-${Date.now()}`;
       setItems((prev) => [
@@ -55,7 +60,6 @@ export function ChatView({ conversationId, initialMessages }: Props) {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       let convId = activeId;
-      let createdId: string | null = null;
       let failed = false;
       try {
         await streamChat(
@@ -65,7 +69,7 @@ export function ChatView({ conversationId, initialMessages }: Props) {
               case "meta":
                 if (!convId) {
                   convId = e.conversationId;
-                  createdId = convId;
+                  pendingNav.current = convId;
                   setActiveId(convId);
                 }
                 notifyConversationsChanged();
@@ -77,6 +81,21 @@ export function ChatView({ conversationId, initialMessages }: Props) {
                 break;
               case "title":
                 notifyConversationsChanged();
+                break;
+              case "done":
+                // The reply is complete; memory updates may still follow on this stream.
+                if (activeRuns.current === 1) setStreaming(false);
+                break;
+              case "status":
+                setStatus(e.text);
+                break;
+              case "memory":
+                setItems((prev) => {
+                  const reply = prev.find((it) => it.id === assistantId);
+                  const target = reply?.content ? reply : [...prev].reverse().find((it) => it.role === "user");
+                  const notes = e.changes.map((c) => ({ ...c, undone: false }));
+                  return prev.map((it) => (it === target ? { ...it, notes: [...(it.notes ?? []), ...notes] } : it));
+                });
                 break;
               case "error":
                 failed = true;
@@ -94,10 +113,15 @@ export function ChatView({ conversationId, initialMessages }: Props) {
       } finally {
         // Drop an empty placeholder (failed or stopped before any text arrived).
         setItems((prev) => prev.filter((it) => it.id !== assistantId || it.content));
-        setStreaming(false);
+        activeRuns.current--;
+        setStatus(null);
+        setStreaming(activeRuns.current > 0);
         abortRef.current = null;
-        // The reply is saved by now: move a new chat to its own URL (this remounts onto server data).
-        if (createdId && !failed && !ctrl.signal.aborted) router.replace(`/c/${createdId}`);
+        // Everything is saved by now: move a new chat to its own URL (this remounts onto server data).
+        if (pendingNav.current && !failed && !ctrl.signal.aborted && activeRuns.current === 0) {
+          router.replace(`/c/${pendingNav.current}`);
+          pendingNav.current = null;
+        }
       }
     },
     [activeId, router],
@@ -142,6 +166,9 @@ export function ChatView({ conversationId, initialMessages }: Props) {
               </h1>
             </>
           )}
+          <p aria-live="polite" className="h-5 text-xs text-muted">
+            {status}
+          </p>
           <ChatInput
             autoFocus
             streaming={streaming}
