@@ -21,6 +21,10 @@ const Patch = z.object({
   status: z.string().max(40).optional(),
   confidence: z.enum(CONFIDENCES).optional(),
   importance: z.number().int().min(1).max(5).optional(),
+  /** Decision details. */
+  data: z
+    .object({ reasoning: z.string().max(2000).optional(), alternatives: z.array(z.string().trim().min(1).max(200)).max(10).optional() })
+    .optional(),
 });
 
 export async function PATCH(req: Request, { params }: Ctx) {

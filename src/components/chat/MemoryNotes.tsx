@@ -11,6 +11,8 @@ export interface MemoryNote {
   undone: boolean;
   /** Set for memory items (assumptions, decisions…), which have a page in Memory. */
   itemId?: string;
+  /** Set for tasks, which live on the Tasks page. */
+  taskId?: string;
 }
 
 /** Quiet, expandable-on-hover line showing what was saved to the founder profile, with undo. */
@@ -35,9 +37,9 @@ export function MemoryNotes({ notes }: { notes: MemoryNote[] }) {
         return (
           <li key={n.eventId} className="flex items-baseline gap-2" title={n.reason ? `From: “${n.reason}”` : undefined}>
             <span className={isUndone ? "line-through opacity-60" : undefined}>
-              {isUndone ? "Removed from" : "Saved to"} {n.itemId ? "memory" : "your profile"} ·{" "}
-              {n.itemId && !isUndone ? (
-                <Link href={`/memory?item=${n.itemId}`} className="underline-offset-2 hover:text-fg hover:underline">
+              {isUndone ? "Removed from" : "Saved to"} {n.taskId ? "tasks" : n.itemId ? "memory" : "your profile"} ·{" "}
+              {(n.itemId || n.taskId) && !isUndone ? (
+                <Link href={n.taskId ? "/tasks" : `/memory?item=${n.itemId}`} className="underline-offset-2 hover:text-fg hover:underline">
                   {n.summary}
                 </Link>
               ) : (

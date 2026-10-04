@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /** Single-user for now: every row carries an owner so auth/multi-user isn't blocked later. */
 export const LOCAL_OWNER = "local";
@@ -205,3 +205,87 @@ export const agentTraces = sqliteTable(
 
 export type StartupBrief = typeof startupBriefs.$inferSelect;
 export type AgentTrace = typeof agentTraces.$inferSelect;
+
+/** A concrete, time-boxed goal (e.g. "Find out whether 10 students have this problem"). */
+export const objectives = sqliteTable("objectives", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().default(LOCAL_OWNER),
+  startupId: text("startup_id"),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  successCriteria: text("success_criteria").notNull().default(""),
+  status: text("status", { enum: ["active", "achieved", "dropped"] }).notNull().default("active"),
+  createdBy: text("created_by", { enum: ["user", "agent"] }).notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/** A test of an assumption: hypothesis, method, result, conclusion. */
+export const experiments = sqliteTable(
+  "experiments",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().default(LOCAL_OWNER),
+    startupId: text("startup_id"),
+    objectiveId: text("objective_id"),
+    /** The assumption (memory item) this experiment tests. */
+    assumptionId: text("assumption_id"),
+    hypothesis: text("hypothesis").notNull(),
+    method: text("method").notNull().default(""),
+    successCriteria: text("success_criteria").notNull().default(""),
+    status: text("status", { enum: ["planned", "running", "completed", "abandoned"] }).notNull().default("planned"),
+    startDate: text("start_date"),
+    result: text("result").notNull().default(""),
+    conclusion: text("conclusion").notNull().default(""),
+    nextAction: text("next_action").notNull().default(""),
+    createdBy: text("created_by", { enum: ["user", "agent"] }).notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [index("experiments_status_idx").on(t.status)],
+);
+
+export const tasks = sqliteTable(
+  "tasks",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().default(LOCAL_OWNER),
+    startupId: text("startup_id"),
+    objectiveId: text("objective_id"),
+    experimentId: text("experiment_id"),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    category: text("category", { enum: ["research", "interview", "build", "outreach", "admin", "other"] }).notNull().default("other"),
+    priority: text("priority", { enum: ["high", "medium", "low"] }).notNull().default("medium"),
+    status: text("status", { enum: ["todo", "doing", "blocked", "done", "dropped"] }).notNull().default("todo"),
+    /** YYYY-MM-DD, local calendar date. */
+    dueDate: text("due_date"),
+    origin: text("origin", { enum: ["conversation", "manual", "plan"] }).notNull(),
+    /** JSON, e.g. { conversationId, messageId, quote } or { proposalId }. */
+    originRef: text("origin_ref").notNull().default(sql`'{}'`),
+    createdBy: text("created_by", { enum: ["user", "agent"] }).notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    completedAt: text("completed_at"),
+    deletedAt: text("deleted_at"),
+  },
+  (t) => [index("tasks_status_idx").on(t.status)],
+);
+
+/** `taskId` cannot start until `dependsOnId` is done. */
+export const taskDeps = sqliteTable(
+  "task_deps",
+  {
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    dependsOnId: text("depends_on_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.dependsOnId] })],
+);
+
+export type Objective = typeof objectives.$inferSelect;
+export type Experiment = typeof experiments.$inferSelect;
+export type Task = typeof tasks.$inferSelect;

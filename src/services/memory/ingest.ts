@@ -1,11 +1,14 @@
 import type { Db } from "@/db/client";
-import { getItem, listEvidence } from "@/db/queries/memory";
+import { getItem, listEventsForEntity, listEvidence } from "@/db/queries/memory";
 import type { MemoryEvent, Proposal } from "@/db/schema";
 import type { ItemKind } from "@/lib/memory";
 import { STAGE_KEYS, STARTUP_FIELDS, type StageKey, type StartupFieldKey } from "@/lib/profile";
 import { applyFounderCandidates, type Origin } from "./founder";
 import { addEvidence, createItem, findDuplicate } from "./items";
 import { createProposal, type ProposalChange } from "./proposals";
+import { isValidDate, todayLocal } from "@/lib/work";
+import { createTask, findDuplicateTask, updateTask } from "@/services/work/tasks";
+import { getTaskRow } from "@/db/queries/work";
 import { readActiveStartup } from "./startup";
 
 /** Shape of validated model output (see agent/extraction.ts). Kept structural to avoid a dependency cycle. */
@@ -13,8 +16,10 @@ export interface Candidates {
   founder: Array<{ field: Parameters<typeof applyFounderCandidates>[1][number]["field"]; value: string; quote: string }>;
   items: Array<{ kind: Exclude<ItemKind, "note">; title: string; details: string; importance: number; quote: string }>;
   evidence: Array<{ target: string; stance: "supports" | "weakens"; strength: "anecdotal" | "moderate"; excerpt: string; quote: string }>;
+  tasks: Array<{ title: string; dueDate: string | null; quote: string }>;
+  taskUpdates: Array<{ target: string; status: "doing" | "done" | "dropped"; quote: string }>;
   proposals: Array<{
-    type: ProposalChange["type"];
+    type: Exclude<ProposalChange["type"], "plan">;
     field: string | null;
     value: string | null;
     target: string | null;
@@ -26,6 +31,8 @@ export interface Candidates {
 export const MAX_ITEMS_PER_TURN = 5;
 export const MAX_EVIDENCE_PER_TURN = 4;
 export const MAX_PROPOSALS_PER_TURN = 2;
+export const MAX_TASKS_PER_TURN = 3;
+export const MAX_TASK_UPDATES_PER_TURN = 3;
 
 export interface IngestResult {
   events: MemoryEvent[];
@@ -44,6 +51,8 @@ export function ingestCandidates(
   c: Candidates,
   codes: Map<string, { id: string }>,
   origin: Origin,
+  taskCodes: Map<string, { id: string }> = new Map(),
+  today: string = todayLocal(),
 ): IngestResult {
   const startup = readActiveStartup(db);
   const events: MemoryEvent[] = [];
@@ -100,6 +109,34 @@ export function ingestCandidates(
     evidenceCount++;
   }
 
+  // Tasks the founder commits to are low-risk and internal, so they are created directly (and are undoable).
+  for (const t of c.tasks.slice(0, MAX_TASKS_PER_TURN)) {
+    if (findDuplicateTask(db, t.title)) continue;
+    const due = t.dueDate && isValidDate(t.dueDate) && t.dueDate >= today ? t.dueDate : null;
+    const { event } = createTask(db, {
+      title: t.title,
+      dueDate: due,
+      startupId: startup?.id ?? null,
+      origin: "conversation",
+      originRef: { ...origin, quote: t.quote },
+      createdBy: "agent",
+      reason: t.quote,
+    });
+    events.push(event);
+  }
+
+  let taskUpdates = 0;
+  for (const u of c.taskUpdates) {
+    if (taskUpdates >= MAX_TASK_UPDATES_PER_TURN) break;
+    const id = taskCodes.get(u.target)?.id;
+    const task = id ? getTaskRow(db, id) : undefined;
+    if (!task || task.deletedAt || task.status === u.status) continue;
+    updateTask(db, task.id, { status: u.status }, "agent", u.quote);
+    const ev = listEventsForTask(db, task.id);
+    if (ev) events.push(ev);
+    taskUpdates++;
+  }
+
   for (const p of c.proposals) {
     if (proposals.length >= MAX_PROPOSALS_PER_TURN) break;
     const change = toChange(p, codes);
@@ -130,4 +167,9 @@ function toChange(p: Candidates["proposals"][number], codes: Map<string, { id: s
     case "decision_supersede":
       return itemId && value ? { type: "decision_supersede", itemId, title: value, reasoning: p.rationale } : null;
   }
+}
+
+/** The audit event just written for a task, so the UI can offer undo. */
+function listEventsForTask(db: Db, taskId: string): MemoryEvent | undefined {
+  return listEventsForEntity(db, "task", taskId)[0];
 }

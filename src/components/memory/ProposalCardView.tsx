@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { api, notifyMemoryChanged } from "@/lib/memoryClient";
+import { PlanDetails } from "./PlanDetails";
 import type { ProposalCard } from "@/services/memory/view";
 
 /** A suggested change to the company. Nothing happens until the founder accepts. */
@@ -34,10 +35,11 @@ export function ProposalCardView({ proposal, onChange }: { proposal: ProposalCar
       </p>
       <p className="mt-1 text-[length:var(--fs-base)]">{current.summary}</p>
       {current.rationale && <p className="mt-1 text-muted">{current.rationale}</p>}
+      {current.plan && <PlanDetails plan={current.plan} />}
       {!decided && (
         <div className="mt-3 flex gap-2">
           <Button variant="primary" disabled={busy} onClick={() => void decide("accept")}>
-            Accept
+            {current.plan ? "Create plan" : "Accept"}
           </Button>
           <Button variant="ghost" disabled={busy} onClick={() => void decide("reject")}>
             Not now

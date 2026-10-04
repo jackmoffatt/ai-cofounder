@@ -18,6 +18,7 @@ const Create = z.object({
   title: z.string().trim().min(1).max(300),
   body: z.string().max(4000).optional(),
   importance: z.number().int().min(1).max(5).optional(),
+  data: z.object({ reasoning: z.string().max(2000).optional() }).optional(),
 });
 
 export async function POST(req: Request) {

@@ -43,6 +43,13 @@
       "when": 1791084919075,
       "tag": "0005_memory_fts",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791142044201,
+      "tag": "0006_work",
+      "breakpoints": true
     }
   ]
 }

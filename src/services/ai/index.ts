@@ -17,6 +17,8 @@ function fakeExtraction(req: ChatRequest) {
     founder: [] as Array<{ field: string; value: string; quote: string }>,
     items: [] as Array<{ kind: string; title: string; details: string; importance: number; quote: string }>,
     evidence: [] as Array<{ target: string; stance: string; strength: string; excerpt: string; quote: string }>,
+    tasks: [] as Array<{ title: string; dueDate: string | null; quote: string }>,
+    taskUpdates: [] as Array<{ target: string; status: string; quote: string }>,
     proposals: [] as Array<{ type: string; field: string | null; value: string | null; target: string | null; rationale: string; quote: string }>,
   };
   const name = /my name is (\w+)/i.exec(text);
@@ -31,6 +33,10 @@ function fakeExtraction(req: ChatRequest) {
   if (target) out.proposals.push({ type: "startup_field", field: "targetCustomer", value: target[1], target: null, rationale: "You said so", quote: target[0] });
   const stage = /we are now in (validation)/i.exec(text);
   if (stage) out.proposals.push({ type: "stage", field: null, value: "validation", target: null, rationale: "You said so", quote: stage[0] });
+  const remind = /remind me to ([^.\n]+)/i.exec(text);
+  if (remind) out.tasks.push({ title: remind[1], dueDate: null, quote: remind[0] });
+  const finished = /I finished ([^.\n]+)/i.exec(text);
+  if (finished) out.taskUpdates.push({ target: "t1", status: "done", quote: finished[0] });
   const decided = /we decided to ([^.\n]+)/i.exec(text);
   if (decided) out.items.push({ kind: "decision", title: decided[1], details: "Stated by founder", importance: 4, quote: decided[0] });
   return out;
@@ -43,12 +49,26 @@ function fakeStructured(req: ChatRequest) {
     const recall = /where were we|what did we|why did we|what should i work on/i.test(text);
     const mode = recall ? "REVIEW" : /competitor|market/i.test(text) ? "RESEARCH" : /interview|validate|assumption/i.test(text) ? "VALIDATE" : "DISCOVER";
     const keywords = (text.match(/[a-z]{5,}/gi) ?? []).slice(0, 4).map((w) => w.toLowerCase());
-    return { mode, kinds: [], keywords, recall };
+    const wantsPlan = /validate|plan|experiment/i.test(text) && !recall;
+    return { mode, kinds: [], keywords, recall, wantsPlan };
   }
   if (req.system.includes("You write the Startup Brief")) {
     return {
       narrative: "## Company\nAn early-stage startup. The founder believes the problem is real; this is untested.\n\n## Where we are\nStill gathering evidence.",
       nextAction: { action: "Interview five target customers", why: "The riskiest assumption has no evidence yet." },
+    };
+  }
+  if (req.system.includes("convert a validation plan")) {
+    return {
+      plan: {
+        objective: { title: "Find out whether students really lose time to scheduling", description: "Talk to real students", successCriteria: "7 of 10 describe it unprompted" },
+        assumptions: [{ target: "i1", title: "Students lose time to scheduling" }],
+        experiments: [{ assumption: 0, hypothesis: "Most students find scheduling painful", method: "10 short interviews", successCriteria: "7 of 10 mention it" }],
+        tasks: [
+          { title: "Write interview script", description: "", category: "research", priority: "high", experiment: 0, dependsOn: [], dueInDays: 1 },
+          { title: "Interview 10 students", description: "", category: "interview", priority: "high", experiment: 0, dependsOn: [0], dueInDays: 7 },
+        ],
+      },
     };
   }
   return fakeExtraction(req);

@@ -19,6 +19,8 @@ import { refreshBriefIfStale } from "@/services/brief";
 import type { Mode } from "@/lib/modes";
 import type { StageKey } from "@/lib/profile";
 import { buildContext } from "./contextBuilder";
+import { planFromReply } from "./planning";
+import { createProposal } from "@/services/memory/proposals";
 import { classifyIntent } from "./intent";
 import { updateSummary } from "./summary";
 import { writeTrace } from "./trace";
@@ -44,6 +46,8 @@ export interface MemoryChange {
   reason: string;
   /** Set when the change created or touched a memory item, so the UI can link to it. */
   itemId?: string;
+  /** Set when the change created or touched a task. */
+  taskId?: string;
 }
 
 export interface TurnInput {
@@ -156,7 +160,7 @@ export async function* runChatTurn(
     yield { type: "status", text: "Updating memory…" };
     const known = readFounder(db);
     const previousReply = stored.filter((m) => m.role === "assistant").at(-1)?.content ?? null;
-    const { extraction, codes } = await extractMemory(provider, {
+    const { extraction, codes, taskCodes } = await extractMemory(provider, {
       db,
       userMessage: userMessage.content,
       lastAssistantMessage: previousReply,
@@ -164,10 +168,21 @@ export async function* runChatTurn(
       knownProfile: known.profile,
       startup: readActiveStartup(db),
     });
-    const { events, proposals } = ingestCandidates(db, extraction, codes, {
-      conversationId: conversation.id,
-      messageId: userMessage.id,
-    });
+    const { events, proposals } = ingestCandidates(
+      db,
+      extraction,
+      codes,
+      { conversationId: conversation.id, messageId: userMessage.id },
+      taskCodes,
+    );
+
+    // A plan the founder asked for becomes one proposal card: accept to create the objective, experiments and tasks.
+    if (intent.wantsPlan && text && !failure) {
+      yield { type: "status", text: "Drafting the plan…" };
+      const plan = await planFromReply(provider, db, { userMessage: userMessage.content, reply: text });
+      const row = plan && createProposal(db, plan, { rationale: "The plan above, ready to save as an objective, experiments and tasks.", originRef: { conversationId: conversation.id, messageId } });
+      if (row) proposals.push(row);
+    }
 
     memoryEventIds = events.map((e) => e.id);
     proposalIds = proposals.map((p) => p.id);
@@ -185,6 +200,7 @@ export async function* runChatTurn(
           summary: e.summary,
           reason: e.reason,
           itemId: (JSON.parse(e.change) as { itemId?: string }).itemId,
+          taskId: (JSON.parse(e.change) as { taskId?: string }).taskId,
         })),
       };
     }

@@ -27,3 +27,8 @@ export const MODE_GUIDANCE: Record<Mode, string> = {
   GROW: "Mode: go-to-market. Focus on positioning, distribution and the first customers; ground advice in who the founder can actually reach.",
   REVIEW: "Mode: review. Summarise where things stand honestly: what is known, what is only believed, what is open, and the single highest-value next step.",
 };
+
+/** Added to the prompt when the founder asks for a plan. Mirrors the structure the plan card is built from. */
+export const PLAN_GUIDANCE = `The founder wants a concrete plan. Structure your answer with exactly these headings:
+**Objective** (one sentence, time-boxed), **Assumptions to test** (reuse recorded assumptions where they exist; say which are riskiest), **Experiments** (each tests one assumption, is cheap, and is measured in days not months), **Tasks** (concrete, ordered, each tied to an experiment; note any that depend on another), **Success criteria** (what result would support or weaken each assumption, stated before running it).
+Prefer evidence from real people over more analysis. Keep it tight: at most 4 experiments and 10 tasks.`;

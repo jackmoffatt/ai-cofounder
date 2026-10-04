@@ -85,7 +85,25 @@ export function ItemPanel({ itemId, onDeleted, onChanged }: { itemId: string; on
         </p>
       )}
 
-      <EditableField label="Notes" value={item.body} rows={3} onSave={async (v) => void (await patch({ body: v }))} />
+      {item.kind === "decision" ? (
+        <>
+          <EditableField
+            label="Why we decided this"
+            value={String(item.data.reasoning ?? item.body ?? "")}
+            rows={3}
+            onSave={async (v) => void (await patch({ data: { reasoning: v } }))}
+          />
+          <EditableField
+            label="Alternatives considered"
+            hint="One per line."
+            value={Array.isArray(item.data.alternatives) ? (item.data.alternatives as string[]).join("\n") : ""}
+            rows={2}
+            onSave={async (v) => void (await patch({ data: { alternatives: v.split("\n").map((l) => l.trim()).filter(Boolean) } }))}
+          />
+        </>
+      ) : (
+        <EditableField label="Notes" value={item.body} rows={3} onSave={async (v) => void (await patch({ body: v }))} />
+      )}
 
       {isAssumption && (
         <section aria-label="Evidence">

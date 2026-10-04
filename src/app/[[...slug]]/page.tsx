@@ -27,7 +27,7 @@ export default async function Page({ params }: { params: Promise<{ slug?: string
   const initialMessages = rows.map((m) => {
     const notes = idsOf(m.metadata, "memory").flatMap((eid) => {
       const e = events.get(eid);
-      return e ? [{ eventId: e.id, summary: e.summary, reason: e.reason, undone: e.undoneAt !== null, itemId: itemIdOf(e.change) }] : [];
+      return e ? [{ eventId: e.id, summary: e.summary, reason: e.reason, undone: e.undoneAt !== null, itemId: itemIdOf(e.change), taskId: taskIdOf(e.change) }] : [];
     });
     const cards = idsOf(m.metadata, "proposals").flatMap((pid) => proposals.get(pid) ?? []);
     return {
@@ -67,5 +67,14 @@ function refsOf(metadata: string): Record<string, { id: string; kind: string; ti
     return refs && typeof refs === "object" ? refs : {};
   } catch {
     return {};
+  }
+}
+
+function taskIdOf(change: string): string | undefined {
+  try {
+    const id = JSON.parse(change).taskId;
+    return typeof id === "string" ? id : undefined;
+  } catch {
+    return undefined;
   }
 }

@@ -9,6 +9,10 @@ import { modelFor } from "@/services/ai/models";
 import type { AIProvider } from "@/services/ai/types";
 import { readFounder } from "@/services/memory/founder";
 import { readActiveStartup } from "@/services/memory/startup";
+import { listExperimentRows } from "@/db/queries/work";
+import { isOpen, todayLocal } from "@/lib/work";
+import { currentObjective } from "@/services/work/objectives";
+import { listTaskViews } from "@/services/work/tasks";
 
 /** Material memory changes since the last brief before it is considered stale. */
 export const STALE_AFTER_EVENTS = 5;
@@ -89,6 +93,15 @@ export function renderStatusSections(db: Db): string {
   const insights = items.filter((i) => i.kind === "insight" && !INACTIVE_STATUSES.has(i.status)).sort(byImportance).slice(0, 6);
   if (insights.length) out.push(`## Customer insights (founder-reported)\n${insights.map((i) => `- ${i.title} [m:${refFor(i.id)}]`).join("\n")}`);
 
+  const experiments = listExperimentRows(db).filter((e) => e.status === "planned" || e.status === "running").slice(0, 6);
+  if (experiments.length) {
+    out.push(`## Active experiments\n${experiments.map((e) => `- [${e.status}] ${e.hypothesis}${e.method ? ` — ${e.method}` : ""}`).join("\n")}`);
+  }
+  const tasks = listTaskViews(db, todayLocal()).filter((t) => isOpen(t.status)).slice(0, 5);
+  if (tasks.length) {
+    out.push(`## Next tasks\n${tasks.map((t) => `- ${t.title} (${t.effectiveStatus}${t.dueDate ? `, due ${t.dueDate}${t.overdue ? ", overdue" : ""}` : ""})`).join("\n")}`);
+  }
+
   return out.join("\n\n");
 }
 
@@ -103,6 +116,10 @@ function inputFor(db: Db): string {
   );
   const f = FOUNDER_FIELDS.flatMap((x) => (founder.profile[x.key]?.length ? [`${x.label}: ${founder.profile[x.key]!.join("; ")}`] : []));
   parts.push(`FOUNDER\n${[founder.name ? `Name: ${founder.name}` : "", ...f].filter(Boolean).join("\n") || "(little known)"}`);
+  const objective = currentObjective(db);
+  if (objective) parts.push(`CURRENT OBJECTIVE\n${objective.title}${objective.successCriteria ? `\nSuccess criteria: ${objective.successCriteria}` : ""}`);
+  const openTasks = listTaskViews(db, todayLocal()).filter((t) => isOpen(t.status));
+  if (openTasks.length) parts.push(`OPEN TASKS (${openTasks.length})\n${openTasks.slice(0, 10).map((t) => `- ${t.title} (${t.effectiveStatus})`).join("\n")}`);
   const items = liveItems(db).filter((i) => !INACTIVE_STATUSES.has(i.status) || i.status === "rejected");
   parts.push(
     `RECORDED KNOWLEDGE\n${

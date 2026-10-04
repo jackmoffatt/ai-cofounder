@@ -3,6 +3,7 @@ import { getConversation } from "@/db/queries/conversations";
 import { getItem, listEventsForEntity, listEvidence, listItems } from "@/db/queries/memory";
 import type { Evidence, MemoryEvent, MemoryItem } from "@/db/schema";
 import { refFor } from "@/lib/memory";
+import type { PlanChange } from "@/services/work/plan";
 
 /** JSON-friendly shapes for the UI (parsed JSON columns, no internal fields). */
 export interface ItemView {
@@ -93,15 +94,21 @@ export interface ProposalCard {
   summary: string;
   rationale: string;
   status: "pending" | "accepted" | "rejected";
+  /** The full plan, for plan proposals, so the card can show what accepting would create. */
+  plan?: PlanChange;
 }
 
-export const toCard = (p: ProposalCard): ProposalCard => ({
-  id: p.id,
-  type: p.type,
-  summary: p.summary,
-  rationale: p.rationale,
-  status: p.status,
-});
+export const toCard = (p: { id: string; type: string; summary: string; rationale: string; status: ProposalCard["status"]; change?: string }): ProposalCard => {
+  let plan: PlanChange | undefined;
+  if (p.type === "plan" && p.change) {
+    try {
+      plan = JSON.parse(p.change) as PlanChange;
+    } catch {
+      /* show the summary only */
+    }
+  }
+  return { id: p.id, type: p.type, summary: p.summary, rationale: p.rationale, status: p.status, ...(plan ? { plan } : {}) };
+};
 
 /** Resolves [m:handle] citations in `text` to real items so the UI can link them. Unknown handles are omitted. */
 export function resolveRefs(db: Db, text: string): Record<string, { id: string; kind: string; title: string }> {

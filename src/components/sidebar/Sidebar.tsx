@@ -9,7 +9,7 @@ import { IconButton } from "@/components/ui/IconButton";
 import { groupByDay, useConversations, type ConversationSummary } from "@/lib/useConversations";
 import { usePendingProposals } from "@/lib/usePendingProposals";
 
-const sections = ["Research", "Tasks", "Decisions"]; // enabled as their milestones land
+const sections = ["Research"]; // enabled as their milestones land
 
 function ConversationGroup({
   label,
@@ -109,6 +109,12 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           trailing={pending > 0 ? <span aria-label={`${pending} suggested changes`} className="size-1.5 rounded-full bg-accent" /> : undefined}
         >
           Memory
+        </NavigationItem>
+        <NavigationItem onClick={() => open("/tasks")} active={pathname === "/tasks"}>
+          Tasks
+        </NavigationItem>
+        <NavigationItem onClick={() => open("/decisions")} active={pathname === "/decisions"}>
+          Decisions
         </NavigationItem>
         {sections.map((name) => (
           <NavigationItem key={name} disabled>

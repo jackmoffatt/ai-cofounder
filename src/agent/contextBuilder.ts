@@ -4,13 +4,18 @@ import { latestBrief } from "@/db/queries/context";
 import { recentEvents } from "@/db/queries/memory";
 import type { Conversation, Message } from "@/db/schema";
 import { KIND_LABELS, refFor } from "@/lib/memory";
-import { MODE_GUIDANCE } from "@/lib/modes";
+import { MODE_GUIDANCE, PLAN_GUIDANCE } from "@/lib/modes";
 import { FOUNDER_FIELDS, STARTUP_FIELDS, founderFieldCount, stageLabel } from "@/lib/profile";
 import { estimateTokens, truncateToTokens } from "@/lib/tokens";
 import type { ChatMessage } from "@/services/ai/types";
 import { readFounder } from "@/services/memory/founder";
 import { readActiveStartup } from "@/services/memory/startup";
 import { listMessages } from "@/db/queries/conversations";
+import { isOpen, todayLocal } from "@/lib/work";
+import { currentObjective } from "@/services/work/objectives";
+import { listExperimentRows } from "@/db/queries/work";
+import { getItem } from "@/db/queries/memory";
+import { listTaskViews } from "@/services/work/tasks";
 import type { Intent } from "./intent";
 import { retrieve, type Reason } from "./retrieval";
 import { SYSTEM_PROMPT } from "./systemPrompt";
@@ -20,6 +25,7 @@ export const BUDGETS = {
   brief: 2000,
   memory: 1800,
   recall: 700,
+  work: 800,
   summary: 600,
   history: 8000,
 } as const;
@@ -150,6 +156,41 @@ function recallSection(db: Db, conversationId: string | null): string | null {
   return parts.length ? truncateToTokens(`## Where things were left\n${parts.join("\n\n")}`, BUDGETS.recall) : null;
 }
 
+/** The objective, running experiments and open tasks. Small enough to always include. */
+export function workSection(db: Db, today = todayLocal()): string | null {
+  const objective = currentObjective(db);
+  const experiments = listExperimentRows(db).filter((e) => e.status === "planned" || e.status === "running").slice(0, 6);
+  const tasks = listTaskViews(db, today).filter((t) => isOpen(t.status));
+  if (!objective && !experiments.length && !tasks.length) return null;
+
+  const parts: string[] = [];
+  if (objective) parts.push(`Objective: ${objective.title}${objective.successCriteria ? `\nSuccess criteria: ${objective.successCriteria}` : ""}`);
+  if (experiments.length) {
+    parts.push(
+      "Experiments:\n" +
+        experiments
+          .map((e) => {
+            const a = e.assumptionId ? getItem(db, e.assumptionId) : undefined;
+            return `- [${e.status}] ${e.hypothesis}${e.method ? ` — ${e.method}` : ""}${a ? ` (tests: ${a.title})` : ""}`;
+          })
+          .join("\n"),
+    );
+  }
+  if (tasks.length) {
+    const shown = tasks.slice(0, 12);
+    parts.push(
+      `Open tasks (most important first, ${tasks.length} total):\n` +
+        shown
+          .map((t) => {
+            const bits = [t.effectiveStatus, t.priority, t.dueDate ? `${t.overdue ? "OVERDUE, " : ""}due ${t.dueDate}` : null, t.blockedBy.length ? `blocked by "${t.blockedBy[0].title}"` : null].filter(Boolean);
+            return `- ${t.title} (${bits.join(" · ")})`;
+          })
+          .join("\n"),
+    );
+  }
+  return truncateToTokens(`## Current work\nToday is ${today}.\n${parts.join("\n\n")}`, BUDGETS.work);
+}
+
 /** The raw messages to send: everything the summary doesn't cover, within a token budget. */
 function historyWindow(conv: Conversation | null, stored: Message[]): ChatMessage[] {
   const start = Math.max(conv?.summaryCount ?? 0, stored.length - MAX_RAW_MESSAGES, 0);
@@ -181,6 +222,9 @@ export function buildContext(db: Db, input: BuildInput): BuiltContext {
   const startup = readActiveStartup(db);
   sections.push({ name: "startup", text: startupSection(db) });
 
+  const work = workSection(db);
+  if (work) sections.push({ name: "work", text: work });
+
   const brief = latestBrief(db);
   if (brief) {
     sections.push({
@@ -206,6 +250,7 @@ export function buildContext(db: Db, input: BuildInput): BuiltContext {
       "You are still getting to know the founder. Answer what they ask, and also weave in one or two natural discovery questions (interests, skills, resources, constraints, problems they've noticed). Never ask more than two questions at once, and never present a questionnaire.",
     );
   }
+  if (intent.wantsPlan) guidance.push(PLAN_GUIDANCE);
   if (memory.text) guidance.push(CITE_RULE);
   sections.push({ name: "guidance", text: `## This conversation\n${guidance.join("\n")}` });
 
@@ -242,7 +287,7 @@ export function buildContext(db: Db, input: BuildInput): BuiltContext {
 /** System prompt for a conversation-less context (tests, evals): REVIEW mode, everything relevant. */
 export function buildSystemPrompt(db: Db, intent?: Partial<Intent>): string {
   const startup = readActiveStartup(db);
-  const base: Intent = { mode: startup ? "REVIEW" : "DISCOVER", kinds: [], keywords: [], recall: false, source: "fallback", ...intent };
+  const base: Intent = { mode: startup ? "REVIEW" : "DISCOVER", kinds: [], keywords: [], recall: false, wantsPlan: false, source: "fallback", ...intent };
   return buildContext(db, { conversation: null, stored: [], intent: base }).system;
 }
 

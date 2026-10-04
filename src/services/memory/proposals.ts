@@ -13,6 +13,7 @@ import { evidenceJustifies } from "@/lib/epistemics";
 import { isValidStatus } from "@/lib/memory";
 import { STAGE_KEYS, STARTUP_FIELDS, stageLabel, type StageKey, type StartupFieldKey } from "@/lib/profile";
 import { createItem, updateItem } from "./items";
+import { applyPlan, describePlan, validatePlan, type PlanChange } from "@/services/work/plan";
 import { readActiveStartup, saveStartupEdit } from "./startup";
 
 /** Payloads by proposal type. Stored as JSON in proposals.change. */
@@ -21,7 +22,8 @@ export type ProposalChange =
   | { type: "stage"; to: StageKey }
   | { type: "objective"; text: string }
   | { type: "assumption_status"; itemId: string; to: "validated" | "rejected" }
-  | { type: "decision_supersede"; itemId: string; title: string; reasoning: string };
+  | { type: "decision_supersede"; itemId: string; title: string; reasoning: string }
+  | PlanChange;
 
 export class ProposalError extends Error {}
 
@@ -42,6 +44,8 @@ export function describeChange(db: Db, c: ProposalChange): string {
     }
     case "decision_supersede":
       return `Replace a decision with “${c.title}”`;
+    case "plan":
+      return describePlan(c);
   }
 }
 
@@ -73,6 +77,8 @@ export function validateChange(db: Db, c: ProposalChange): string | null {
       if (!item || item.deletedAt || item.kind !== "decision" || item.status !== "active") return "Not an active decision";
       return c.title.trim() ? null : "Empty decision";
     }
+    case "plan":
+      return validatePlan(db, c);
   }
 }
 
@@ -101,7 +107,7 @@ export function createProposal(
   return row;
 }
 
-function apply(db: Db, c: ProposalChange, reason: string): void {
+function apply(db: Db, c: ProposalChange, reason: string, proposalId: string): void {
   const startup = readActiveStartup(db);
   switch (c.type) {
     case "startup_field":
@@ -133,6 +139,9 @@ function apply(db: Db, c: ProposalChange, reason: string): void {
       });
       break;
     }
+    case "plan":
+      applyPlan(db, c, { proposalId });
+      break;
   }
 }
 
@@ -143,7 +152,7 @@ export function acceptProposal(db: Db, id: string): Proposal {
   const change = JSON.parse(p.change) as ProposalChange;
   const invalid = validateChange(db, change);
   if (invalid) throw new ProposalError(`This no longer applies: ${invalid.toLowerCase()}`);
-  apply(db, change, `Accepted proposal: ${p.summary}`);
+  apply(db, change, `Accepted proposal: ${p.summary}`, id);
   updateProposalRow(db, id, { status: "accepted", decidedAt: new Date().toISOString() });
   insertEvent(db, {
     entityType: "proposal",
