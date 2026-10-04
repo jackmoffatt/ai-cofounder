@@ -30,3 +30,6 @@ export const INACTIVE_STATUSES = new Set(["superseded", "reversed", "answered", 
 
 export const PROPOSAL_TYPES = ["startup_field", "stage", "objective", "assumption_status", "decision_supersede"] as const;
 export type ProposalType = (typeof PROPOSAL_TYPES)[number];
+
+/** Short stable handle used to cite a memory item in text, e.g. [m:ab12cd34]. */
+export const refFor = (id: string) => id.replace(/-/g, "").slice(0, 8);

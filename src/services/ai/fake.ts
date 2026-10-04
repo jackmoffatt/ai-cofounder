@@ -13,6 +13,8 @@ export class FakeProvider implements AIProvider {
       failWith?: Error;
       /** What `structured()` returns; defaults to `{}`, which schemas with all-optional fields accept. */
       structuredResult?: unknown | ((req: ChatRequest) => unknown);
+      /** What `complete()` returns; defaults to the first four words of the first message (a fake title). */
+      completeResult?: (req: ChatRequest) => string;
     } = {},
   ) {}
 
@@ -30,8 +32,11 @@ export class FakeProvider implements AIProvider {
   }
 
   async complete(req: ChatRequest): Promise<{ text: string; usage: Usage }> {
+    this.requests.push(req);
+    if (this.opts.failWith) throw this.opts.failWith;
     const first = req.messages[0]?.content ?? "";
-    return { text: first.split(/\s+/).slice(0, 4).join(" "), usage: { inputTokens: 0, outputTokens: 0 } };
+    const text = this.opts.completeResult?.(req) ?? first.split(/\s+/).slice(0, 4).join(" ");
+    return { text, usage: { inputTokens: 0, outputTokens: 0 } };
   }
 
   async structured<T>(req: ChatRequest, schema: ZodType<T>): Promise<{ data: T; usage: Usage }> {

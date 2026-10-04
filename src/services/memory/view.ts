@@ -2,6 +2,7 @@ import type { Db } from "@/db/client";
 import { getConversation } from "@/db/queries/conversations";
 import { getItem, listEventsForEntity, listEvidence, listItems } from "@/db/queries/memory";
 import type { Evidence, MemoryEvent, MemoryItem } from "@/db/schema";
+import { refFor } from "@/lib/memory";
 
 /** JSON-friendly shapes for the UI (parsed JSON columns, no internal fields). */
 export interface ItemView {
@@ -101,3 +102,15 @@ export const toCard = (p: ProposalCard): ProposalCard => ({
   rationale: p.rationale,
   status: p.status,
 });
+
+/** Resolves [m:handle] citations in `text` to real items so the UI can link them. Unknown handles are omitted. */
+export function resolveRefs(db: Db, text: string): Record<string, { id: string; kind: string; title: string }> {
+  const handles = new Set([...text.matchAll(/\[m:([0-9a-f]{6,8})\]/g)].map((m) => m[1]));
+  if (!handles.size) return {};
+  const out: Record<string, { id: string; kind: string; title: string }> = {};
+  for (const i of listItems(db)) {
+    const h = refFor(i.id);
+    if (handles.has(h)) out[h] = { id: i.id, kind: i.kind, title: i.title };
+  }
+  return out;
+}

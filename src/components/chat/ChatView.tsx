@@ -5,7 +5,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { notifyConversationsChanged, streamChat } from "@/lib/chatClient";
 import { notifyMemoryChanged } from "@/lib/memoryClient";
 import { ChatInput } from "@/components/ui/ChatInput";
+import { ContextPanel } from "@/components/context/ContextPanel";
+import { ItemPanel } from "@/components/memory/ItemPanel";
 import { Button } from "@/components/ui/Button";
+import { useDebugMode } from "@/lib/useDebugMode";
+import { TracePanel } from "./TracePanel";
 import { Message, type ChatItem } from "./Message";
 
 const SUGGESTIONS: Array<{ label: string; prompt: string }> = [
@@ -26,6 +30,8 @@ export function ChatView({ conversationId, initialMessages }: Props) {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [panel, setPanel] = useState<{ type: "item" | "trace"; id: string } | null>(null);
+  const debug = useDebugMode();
 
   // Navigating between conversations remounts this component (the route segment changes), so props
   // only seed state. For a brand-new chat we learn the id mid-stream and adopt it here.
@@ -83,9 +89,13 @@ export function ChatView({ conversationId, initialMessages }: Props) {
               case "title":
                 notifyConversationsChanged();
                 break;
+              case "context":
+                setItems((prev) => prev.map((it) => (it.id === assistantId ? { ...it, refs: e.refs } : it)));
+                break;
               case "done":
                 // The reply is complete; memory updates may still follow on this stream.
                 if (activeRuns.current === 1) setStreaming(false);
+                if (e.messageId) setItems((prev) => prev.map((it) => (it.id === assistantId ? { ...it, messageId: e.messageId } : it)));
                 break;
               case "status":
                 setStatus(e.text);
@@ -152,7 +162,13 @@ export function ChatView({ conversationId, initialMessages }: Props) {
         >
           <div className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-4 pb-8 pt-16">
             {items.map((it, i) => (
-              <Message key={it.id} item={it} pending={streaming && i === items.length - 1} />
+              <Message
+                key={it.id}
+                item={it}
+                pending={streaming && i === items.length - 1}
+                onOpenRef={(id) => setPanel({ type: "item", id })}
+                onOpenTrace={debug ? (id) => setPanel({ type: "trace", id }) : undefined}
+              />
             ))}
             {error && (
               <div role="alert" className="flex items-center gap-3 rounded-lg bg-surface-2 px-4 py-3 text-sm">
@@ -206,6 +222,13 @@ export function ChatView({ conversationId, initialMessages }: Props) {
           )}
         </div>
       </div>
+
+      <ContextPanel open={panel !== null} onClose={() => setPanel(null)} title={panel?.type === "trace" ? "Trace" : "Details"}>
+        {panel?.type === "item" && (
+          <ItemPanel key={panel.id} itemId={panel.id} onChanged={() => undefined} onDeleted={() => setPanel(null)} />
+        )}
+        {panel?.type === "trace" && <TracePanel key={panel.id} messageId={panel.id} />}
+      </ContextPanel>
     </div>
   );
 }

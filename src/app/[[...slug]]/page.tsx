@@ -30,7 +30,15 @@ export default async function Page({ params }: { params: Promise<{ slug?: string
       return e ? [{ eventId: e.id, summary: e.summary, reason: e.reason, undone: e.undoneAt !== null, itemId: itemIdOf(e.change) }] : [];
     });
     const cards = idsOf(m.metadata, "proposals").flatMap((pid) => proposals.get(pid) ?? []);
-    return { id: m.id, role: m.role, content: m.content, ...(notes.length ? { notes } : {}), ...(cards.length ? { proposals: cards } : {}) };
+    return {
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      messageId: m.id,
+      ...(notes.length ? { notes } : {}),
+      ...(cards.length ? { proposals: cards } : {}),
+      ...(m.role === "assistant" ? { refs: refsOf(m.metadata) } : {}),
+    };
   });
   return <ChatView conversationId={id.data} initialMessages={initialMessages} />;
 }
@@ -50,5 +58,14 @@ function itemIdOf(change: string): string | undefined {
     return typeof id === "string" ? id : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function refsOf(metadata: string): Record<string, { id: string; kind: string; title: string }> {
+  try {
+    const refs = JSON.parse(metadata).refs;
+    return refs && typeof refs === "object" ? refs : {};
+  } catch {
+    return {};
   }
 }

@@ -36,6 +36,24 @@ function fakeExtraction(req: ChatRequest) {
   return out;
 }
 
+/** Routes `structured()` calls in dev mode by what the system prompt says the task is. */
+function fakeStructured(req: ChatRequest) {
+  if (req.system.includes("You route one message")) {
+    const text = req.messages[0]?.content ?? "";
+    const recall = /where were we|what did we|why did we|what should i work on/i.test(text);
+    const mode = recall ? "REVIEW" : /competitor|market/i.test(text) ? "RESEARCH" : /interview|validate|assumption/i.test(text) ? "VALIDATE" : "DISCOVER";
+    const keywords = (text.match(/[a-z]{5,}/gi) ?? []).slice(0, 4).map((w) => w.toLowerCase());
+    return { mode, kinds: [], keywords, recall };
+  }
+  if (req.system.includes("You write the Startup Brief")) {
+    return {
+      narrative: "## Company\nAn early-stage startup. The founder believes the problem is real; this is untested.\n\n## Where we are\nStill gathering evidence.",
+      nextAction: { action: "Interview five target customers", why: "The riskiest assumption has no evidence yet." },
+    };
+  }
+  return fakeExtraction(req);
+}
+
 let provider: AIProvider | undefined;
 
 /** The one place that chooses a provider. Add new providers here. */
@@ -43,7 +61,11 @@ export function getProvider(): AIProvider {
   if (!provider) {
     switch (process.env.AI_PROVIDER ?? "anthropic") {
       case "fake":
-        provider = new FakeProvider({ delayMs: 15, structuredResult: fakeExtraction });
+        provider = new FakeProvider({
+          delayMs: 15,
+          structuredResult: fakeStructured,
+          completeResult: (r) => (r.system.includes("running summary") ? "Earlier the founder and co-founder discussed the idea." : (r.messages[0]?.content ?? "").split(/\s+/).slice(0, 4).join(" ")),
+        });
         break;
       case "anthropic":
         provider = new AnthropicProvider();

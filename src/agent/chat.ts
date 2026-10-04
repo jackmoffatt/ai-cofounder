@@ -13,8 +13,15 @@ import { ingestCandidates } from "@/services/memory/ingest";
 import { readActiveStartup } from "@/services/memory/startup";
 import { toCard, type ProposalCard } from "@/services/memory/view";
 import { modelFor } from "@/services/ai/models";
-import { AIError, type AIProvider, type ChatMessage } from "@/services/ai/types";
-import { buildSystemPrompt } from "./contextBuilder";
+import { AIError, type AIProvider } from "@/services/ai/types";
+import { lastTraceForConversation } from "@/db/queries/context";
+import { refreshBriefIfStale } from "@/services/brief";
+import type { Mode } from "@/lib/modes";
+import type { StageKey } from "@/lib/profile";
+import { buildContext } from "./contextBuilder";
+import { classifyIntent } from "./intent";
+import { updateSummary } from "./summary";
+import { writeTrace } from "./trace";
 import { extractMemory } from "./extraction";
 import { fallbackTitle, generateTitle } from "./title";
 
@@ -24,6 +31,7 @@ export type TurnEvent =
   | { type: "delta"; text: string }
   | { type: "title"; title: string }
   | { type: "status"; text: string }
+  | { type: "context"; refs: Record<string, { id: string; kind: string; title: string }> }
   | { type: "memory"; changes: MemoryChange[] }
   | { type: "proposals"; proposals: ProposalCard[] }
   | { type: "done"; messageId: string }
@@ -46,8 +54,6 @@ export interface TurnInput {
   signal?: AbortSignal;
 }
 
-/** M1 keeps it simple: the most recent messages. Retrieval and summaries replace this in M4. */
-const MAX_HISTORY_MESSAGES = 40;
 const DEFAULT_TITLE = "New chat";
 
 function errorEvent(err: unknown): TurnEvent {
@@ -83,19 +89,31 @@ export async function* runChatTurn(
   }
   yield { type: "meta", conversationId: conversation.id, isNew };
 
+  const startedAt = Date.now();
   const stored = listMessages(db, conversation.id);
-  const history: ChatMessage[] = stored.slice(-MAX_HISTORY_MESSAGES).map((m) => ({ role: m.role, content: m.content }));
-  // The API requires the first message to be from the user.
-  while (history.length > 1 && history[0].role !== "user") history.shift();
+  const askedAbout = userMessage?.content ?? stored.filter((m) => m.role === "user").at(-1)?.content ?? "";
+
+  yield { type: "status", text: "Reviewing startup context…" };
+  const startup = readActiveStartup(db);
+  const intent = await classifyIntent(provider, {
+    message: askedAbout,
+    previousMode: (lastTraceForConversation(db, conversation.id)?.mode as Mode | undefined) ?? null,
+    stage: (startup?.stage as StageKey | undefined) ?? null,
+  });
+  const built = buildContext(db, { conversation, stored, intent });
+  if (Object.keys(built.refs).length) yield { type: "context", refs: built.refs };
+  const traceId = crypto.randomUUID();
 
   let text = "";
   let meta: Record<string, unknown> = {};
+  let usage = { inputTokens: 0, outputTokens: 0 };
+  let servedBy = modelFor("chat");
   let failure: AIError | null = null;
   try {
     for await (const ev of provider.stream({
       model: modelFor("chat"),
-      system: buildSystemPrompt(db),
-      messages: history,
+      system: built.system,
+      messages: built.messages,
       maxTokens: 32000,
       effort: "medium",
       signal: input.signal,
@@ -104,7 +122,9 @@ export async function* runChatTurn(
         text += ev.text;
         yield { type: "delta", text: ev.text };
       } else {
-        meta = { model: ev.model, usage: ev.usage, stopReason: ev.stopReason };
+        usage = ev.usage;
+        servedBy = ev.model;
+        meta = { model: ev.model, usage: ev.usage, stopReason: ev.stopReason, refs: built.refs, traceId };
         if (ev.stopReason === "refusal" && !text) failure = new AIError("refused");
       }
     }
@@ -119,6 +139,7 @@ export async function* runChatTurn(
   }
 
   // Tell the client the reply is complete first; housekeeping below can take a second or two.
+  const latencyMs = Date.now() - startedAt;
   if (failure && failure.code !== "aborted") yield errorEvent(failure);
   else yield { type: "done", messageId: messageId ?? "" };
 
@@ -129,6 +150,8 @@ export async function* runChatTurn(
     yield { type: "title", title };
   }
 
+  let memoryEventIds: string[] = [];
+  let proposalIds: string[] = [];
   if (userMessage) {
     yield { type: "status", text: "Updating memory…" };
     const known = readFounder(db);
@@ -145,6 +168,9 @@ export async function* runChatTurn(
       conversationId: conversation.id,
       messageId: userMessage.id,
     });
+
+    memoryEventIds = events.map((e) => e.id);
+    proposalIds = proposals.map((p) => p.id);
 
     // Attach to the reply (or the user's message if there was none) so the notes survive reloads.
     const anchor = messageId ?? userMessage.id;
@@ -169,5 +195,22 @@ export async function* runChatTurn(
       };
     }
   }
+
+  writeTrace(db, {
+    id: traceId,
+    conversationId: conversation.id,
+    messageId: messageId ?? userMessage?.id ?? null,
+    context: built.trace,
+    memoryEventIds,
+    proposalIds,
+    model: servedBy,
+    tokensIn: usage.inputTokens,
+    tokensOut: usage.outputTokens,
+    latencyMs,
+  });
+
+  // Keep long conversations cheap, and keep the brief current. Neither can fail the turn.
+  await updateSummary(db, provider, conversation.id);
+  void refreshBriefIfStale(db, provider);
 }
 

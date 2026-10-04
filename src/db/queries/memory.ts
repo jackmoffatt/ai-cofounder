@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   LOCAL_OWNER,
@@ -75,4 +75,39 @@ export function listEventsForEntity(db: Db, entityType: string, entityId: string
     .where(and(eq(memoryEvents.entityType, entityType), eq(memoryEvents.entityId, entityId)))
     .orderBy(desc(memoryEvents.createdAt))
     .all();
+}
+
+/** Item ids matching a keyword query, best first (FTS5 bm25). `fts` must already be a safe FTS expression. */
+export function searchItemIds(db: Db, fts: string, limit = 20): string[] {
+  return db
+    .all<{ item_id: string }>(sql`SELECT item_id FROM memory_items_fts WHERE memory_items_fts MATCH ${fts} ORDER BY rank LIMIT ${limit}`)
+    .map((r) => r.item_id);
+}
+
+/** Most recent audit events that were not undone, newest first. */
+export function recentEvents(db: Db, limit = 8): MemoryEvent[] {
+  return db
+    .select()
+    .from(memoryEvents)
+    .where(isNull(memoryEvents.undoneAt))
+    .orderBy(desc(memoryEvents.createdAt))
+    .limit(limit)
+    .all();
+}
+
+export function countEventsSince(db: Db, sinceIso: string): number {
+  return db
+    .select({ n: sql<number>`count(*)` })
+    .from(memoryEvents)
+    .where(and(isNull(memoryEvents.undoneAt), sql`${memoryEvents.createdAt} > ${sinceIso}`, sql`(${memoryEvents.entityType} != 'proposal' OR ${memoryEvents.summary} LIKE 'Accepted%')`))
+    .get()!.n;
+}
+
+/** Events that change the company's direction (startup edits, accepted proposals): enough on their own to refresh the brief. */
+export function countStrategicEventsSince(db: Db, sinceIso: string): number {
+  return db
+    .select({ n: sql<number>`count(*)` })
+    .from(memoryEvents)
+    .where(and(isNull(memoryEvents.undoneAt), sql`${memoryEvents.createdAt} > ${sinceIso}`, sql`(${memoryEvents.entityType} = 'startup' OR (${memoryEvents.entityType} = 'proposal' AND ${memoryEvents.summary} LIKE 'Accepted%'))`))
+    .get()!.n;
 }

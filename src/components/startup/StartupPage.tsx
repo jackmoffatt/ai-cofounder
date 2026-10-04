@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
+import type { BriefOverview } from "@/services/brief/view";
+import { BriefSection } from "./BriefSection";
 import { EditableField } from "@/components/ui/EditableField";
 import { Input } from "@/components/ui/Input";
 import {
@@ -31,9 +33,11 @@ const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
 export function StartupPage({
   initialFounder,
   initialStartup,
+  initialBrief,
 }: {
   initialFounder: { name: string | null; profile: FounderProfile };
   initialStartup: StartupData | null;
+  initialBrief: BriefOverview;
 }) {
   const [startup, setStartup] = useState(initialStartup);
   const [newName, setNewName] = useState("");
@@ -70,7 +74,9 @@ export function StartupPage({
           don&apos;t write it as proven.
         </p>
 
-        <section className="mt-10 space-y-6" aria-labelledby="startup-heading">
+        <BriefSection initial={initialBrief} />
+
+        <section className="mt-14 space-y-6" aria-labelledby="startup-heading">
           <h2 id="startup-heading" className="text-[length:var(--fs-xl)] font-semibold">
             The company
           </h2>

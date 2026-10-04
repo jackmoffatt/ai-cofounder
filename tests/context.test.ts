@@ -76,15 +76,15 @@ describe("memory in the prompt", () => {
     deleteItem(db, gone.id);
     addEvidence(db, { itemId: item.id, stance: "supports", strength: "anecdotal", excerpt: "one student said so", origin: "manual", createdBy: "user" });
 
-    const p = buildSystemPrompt(db);
-    expect(p).toContain("- Students struggle [testing, low confidence, 1 piece of evidence]");
-    expect(p).toContain("Decisions:\n- Target seniors");
+    const p = buildSystemPrompt(db, { mode: "REVIEW" });
+    expect(p).toMatch(/- \[m:[0-9a-f]{8}\] Students struggle \(assumption · testing · low confidence · 1 piece of evidence\)/);
+    expect(p).toMatch(/- \[m:[0-9a-f]{8}\] Target seniors \(decision · active\)/);
     expect(p).not.toContain("Dropped idea");
     expect(p).toContain("not a fact");
   });
 
   it("adds nothing when memory is empty", () => {
-    expect(buildSystemPrompt(db)).not.toContain("What we have recorded so far");
+    expect(buildSystemPrompt(db)).not.toContain("Relevant recorded knowledge");
   });
 });
 

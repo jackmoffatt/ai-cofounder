@@ -8,6 +8,10 @@ export const conversations = sqliteTable("conversations", {
   id: text("id").primaryKey(),
   ownerId: text("owner_id").notNull().default(LOCAL_OWNER),
   title: text("title").notNull().default("New chat"),
+  /** Rolling summary of the oldest messages, so long chats don't have to be resent in full. */
+  summary: text("summary").notNull().default(""),
+  /** How many messages (from the start) the summary covers. */
+  summaryCount: integer("summary_count").notNull().default(0),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -158,3 +162,46 @@ export const proposals = sqliteTable(
 export type MemoryItem = typeof memoryItems.$inferSelect;
 export type Evidence = typeof evidence.$inferSelect;
 export type Proposal = typeof proposals.$inferSelect;
+
+/** Versioned, AI-written snapshot of the company. Latest is included in context; history is kept. */
+export const startupBriefs = sqliteTable(
+  "startup_briefs",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().default(LOCAL_OWNER),
+    startupId: text("startup_id"),
+    version: integer("version").notNull(),
+    /** Narrative (model-written) plus status sections (rendered from the database by code). */
+    content: text("content").notNull(),
+    /** JSON: { action, why } for the recommended next action. */
+    nextAction: text("next_action").notNull().default(sql`'{}'`),
+    /** What triggered generation: first | stale | manual */
+    reason: text("reason").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("startup_briefs_created_idx").on(t.createdAt)],
+);
+
+/** One row per agent turn: what the agent saw and did. For development and trust, not for the model. */
+export const agentTraces = sqliteTable(
+  "agent_traces",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id").notNull(),
+    messageId: text("message_id"),
+    mode: text("mode").notNull(),
+    /** JSON: intent, sections with token estimates, retrieved items and why. */
+    context: text("context").notNull(),
+    /** JSON: memory event ids and proposal ids produced after the reply. */
+    outputs: text("outputs").notNull().default(sql`'{}'`),
+    model: text("model").notNull().default(""),
+    tokensIn: integer("tokens_in").notNull().default(0),
+    tokensOut: integer("tokens_out").notNull().default(0),
+    latencyMs: integer("latency_ms").notNull().default(0),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("agent_traces_conv_idx").on(t.conversationId)],
+);
+
+export type StartupBrief = typeof startupBriefs.$inferSelect;
+export type AgentTrace = typeof agentTraces.$inferSelect;

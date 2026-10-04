@@ -5,7 +5,7 @@ import { LOCAL_OWNER, conversations, messages, type Conversation, type Message }
 const now = () => new Date().toISOString();
 
 export function createConversation(db: Db, title = "New chat"): Conversation {
-  const row = { id: crypto.randomUUID(), ownerId: LOCAL_OWNER, title, createdAt: now(), updatedAt: now() };
+  const row: Conversation = { id: crypto.randomUUID(), ownerId: LOCAL_OWNER, title, summary: "", summaryCount: 0, createdAt: now(), updatedAt: now() };
   db.insert(conversations).values(row).run();
   return row;
 }
@@ -94,13 +94,14 @@ export function mergeMessageMetadata(db: Db, messageId: string, patch: Record<st
 }
 
 /** Turns free text into a safe FTS5 prefix query: each word quoted, last word prefix-matched. */
-export function toFtsQuery(input: string): string | null {
+export function toFtsQuery(input: string, join: "and" | "or" = "and"): string | null {
   const words = input
     .split(/\s+/)
     .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ""))
     .filter(Boolean);
   if (words.length === 0) return null;
-  return words.map((w, i) => (i === words.length - 1 ? `"${w}"*` : `"${w}"`)).join(" ");
+  const terms = words.map((w, i) => (i === words.length - 1 ? `"${w}"*` : `"${w}"`));
+  return terms.join(join === "or" ? " OR " : " ");
 }
 
 export interface SearchHit {
@@ -146,4 +147,19 @@ export function searchConversations(db: Db, query: string, limit = 30): SearchHi
     }
   }
   return [...hits.values()].slice(0, limit);
+}
+
+export function setSummary(db: Db, conversationId: string, summary: string, summaryCount: number): void {
+  db.update(conversations).set({ summary, summaryCount }).where(eq(conversations.id, conversationId)).run();
+}
+
+/** Most recently active conversations other than `excludeId`, for "where were we"-style recall. */
+export function recentConversations(db: Db, excludeId: string, limit = 4): Conversation[] {
+  return db
+    .select()
+    .from(conversations)
+    .where(and(eq(conversations.ownerId, LOCAL_OWNER), sql`${conversations.id} != ${excludeId}`))
+    .orderBy(desc(conversations.updatedAt))
+    .limit(limit)
+    .all();
 }

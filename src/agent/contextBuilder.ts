@@ -1,94 +1,248 @@
 import type { Db } from "@/db/client";
-import {
-  FOUNDER_FIELDS,
-  STARTUP_FIELDS,
-  founderFieldCount,
-  stageLabel,
-} from "@/lib/profile";
-import { listEvidence, listItems } from "@/db/queries/memory";
-import { INACTIVE_STATUSES, KIND_LABELS, type ItemKind } from "@/lib/memory";
+import { recentConversations } from "@/db/queries/conversations";
+import { latestBrief } from "@/db/queries/context";
+import { recentEvents } from "@/db/queries/memory";
+import type { Conversation, Message } from "@/db/schema";
+import { KIND_LABELS, refFor } from "@/lib/memory";
+import { MODE_GUIDANCE } from "@/lib/modes";
+import { FOUNDER_FIELDS, STARTUP_FIELDS, founderFieldCount, stageLabel } from "@/lib/profile";
+import { estimateTokens, truncateToTokens } from "@/lib/tokens";
+import type { ChatMessage } from "@/services/ai/types";
 import { readFounder } from "@/services/memory/founder";
 import { readActiveStartup } from "@/services/memory/startup";
+import { listMessages } from "@/db/queries/conversations";
+import type { Intent } from "./intent";
+import { retrieve, type Reason } from "./retrieval";
 import { SYSTEM_PROMPT } from "./systemPrompt";
 
+/** Token budgets per section. The sum is deliberately far below the model's window: cost and focus. */
+export const BUDGETS = {
+  brief: 2000,
+  memory: 1800,
+  recall: 700,
+  summary: 600,
+  history: 8000,
+} as const;
+
+/** Cap on raw history even when the summary lags behind. */
+const MAX_RAW_MESSAGES = 40;
 /** Below this many filled profile fields (and with no startup), the agent leans into discovery. */
 const SPARSE_FOUNDER_FIELDS = 4;
 
-/**
- * Builds the system prompt for a turn: persona + what we know about the founder and startup.
- * M2 includes everything (it is small); M4 turns this into budgeted, intent-driven retrieval.
- */
-export function buildSystemPrompt(db: Db): string {
-  const founder = readFounder(db);
-  const startup = readActiveStartup(db);
-  const parts: string[] = [SYSTEM_PROMPT];
+export interface TraceItem {
+  ref: string;
+  id: string;
+  kind: string;
+  title: string;
+  status: string;
+  reason: Reason;
+}
 
-  const founderLines = FOUNDER_FIELDS.flatMap((f) => {
+export interface ContextTrace {
+  intent: Intent;
+  sections: Array<{ name: string; tokens: number }>;
+  items: TraceItem[];
+  historyMessages: number;
+  summarizedMessages: number;
+  briefVersion: number | null;
+  totalTokens: number;
+}
+
+export interface BuiltContext {
+  system: string;
+  messages: ChatMessage[];
+  /** handle -> item, so the UI can turn [m:handle] citations into links. */
+  refs: Record<string, { id: string; kind: string; title: string }>;
+  trace: ContextTrace;
+}
+
+const CITE_RULE =
+  "When your answer relies on a specific recorded item, cite it inline with its handle exactly as shown, like [m:ab12cd34]. Only cite handles listed above; never invent one.";
+
+function founderSection(db: Db): { text: string; filledFields: number } {
+  const founder = readFounder(db);
+  const lines = FOUNDER_FIELDS.flatMap((f) => {
     const items = founder.profile[f.key];
     return items?.length ? [`- ${f.label}: ${items.join("; ")}`] : [];
   });
-  if (founder.name) founderLines.unshift(`- Name: ${founder.name}`);
-  parts.push(
-    founderLines.length
-      ? `## About the founder\nThis is what the founder has told you about themselves.\n${founderLines.join("\n")}\n\nShape recommendations around what is realistic for this person. If a suggestion conflicts with something above, say so rather than ignoring it.`
+  if (founder.name) lines.unshift(`- Name: ${founder.name}`);
+  const filled = founderFieldCount(founder.profile) + (founder.name ? 1 : 0);
+  return {
+    filledFields: filled,
+    text: lines.length
+      ? `## About the founder\nThis is what the founder has told you about themselves.\n${lines.join("\n")}\n\nShape recommendations around what is realistic for this person. If a suggestion conflicts with something above, say so rather than ignoring it.`
       : "## About the founder\nYou know nothing about the founder yet.",
-  );
-
-  if (startup) {
-    const lines = [
-      `- Name: ${startup.name}`,
-      `- Stage: ${stageLabel(startup.stage)}`,
-      `- Current objective: ${startup.currentObjective || "not set"}`,
-      ...STARTUP_FIELDS.flatMap((f) => (startup.profile[f.key] ? [`- ${f.label}: ${startup.profile[f.key]}`] : [])),
-    ];
-    parts.push(
-      `## The startup\nThese are the founder's own statements. They are beliefs and intentions, not verified facts, until backed by evidence. Treat them accordingly.\n${lines.join("\n")}`,
-    );
-  } else {
-    parts.push(
-      "## The startup\nNo startup has been established yet. The founder is still exploring. Do not assume or invent an idea.",
-    );
-  }
-
-  const memory = describeMemory(db);
-  if (memory) parts.push(memory);
-
-  if (!startup && founderFieldCount(founder.profile) + (founder.name ? 1 : 0) < SPARSE_FOUNDER_FIELDS) {
-    parts.push(
-      "## This conversation\nYou are still getting to know the founder. Answer what they ask, and also weave in one or two natural discovery questions (interests, skills, resources, constraints, problems they've noticed). Never ask more than two questions at once, and never present a questionnaire.",
-    );
-  }
-
-  return parts.join("\n\n");
+  };
 }
 
-/** Cap on remembered items in the prompt until M4 replaces this with relevance-based retrieval. */
-const MAX_MEMORY_LINES = 30;
-const KIND_ORDER: ItemKind[] = ["decision", "assumption", "question", "insight", "idea"];
+function startupSection(db: Db): string {
+  const startup = readActiveStartup(db);
+  if (!startup) {
+    return "## The startup\nNo startup has been established yet. The founder is still exploring. Do not assume or invent an idea.";
+  }
+  const lines = [
+    `- Name: ${startup.name}`,
+    `- Stage: ${stageLabel(startup.stage)}`,
+    `- Current objective: ${startup.currentObjective || "not set"}`,
+    ...STARTUP_FIELDS.flatMap((f) => (startup.profile[f.key] ? [`- ${f.label}: ${startup.profile[f.key]}`] : [])),
+  ];
+  return `## The startup\nThese are the founder's own statements: beliefs and intentions, not verified facts, until backed by evidence. If the brief below disagrees with this list, this list is current.\n${lines.join("\n")}`;
+}
 
-/** What has been recorded so far, with epistemic status so beliefs never read as facts. */
-export function describeMemory(db: Db): string | null {
-  const items = listItems(db)
-    .filter((i) => !INACTIVE_STATUSES.has(i.status) && i.kind !== "note")
-    .sort((a, b) => b.importance - a.importance || b.updatedAt.localeCompare(a.updatedAt))
-    .slice(0, MAX_MEMORY_LINES);
-  if (!items.length) return null;
+function memoryLine(r: ReturnType<typeof retrieve>[number]): string {
+  const { item } = r;
+  const bits = [item.kind === "insight" ? "customer insight, founder-reported" : item.kind, item.status];
+  if (item.kind === "assumption") {
+    bits.push(`${item.confidence} confidence`, r.evidenceCount === 0 ? "no evidence" : `${r.evidenceCount} piece${r.evidenceCount === 1 ? "" : "s"} of evidence`);
+  }
+  let line = `- [m:${refFor(item.id)}] ${item.title} (${bits.join(" · ")})`;
+  const reasoning = (() => {
+    try {
+      return (JSON.parse(item.data) as { reasoning?: string }).reasoning || item.body;
+    } catch {
+      return item.body;
+    }
+  })();
+  if (item.kind === "decision" && reasoning) line += `\n  Reasoning: ${reasoning.slice(0, 240)}`;
+  else if (item.body) line += `\n  Notes: ${item.body.slice(0, 160)}`;
+  return line;
+}
 
-  const sections = KIND_ORDER.flatMap((kind) => {
-    const lines = items
-      .filter((i) => i.kind === kind)
-      .map((i) => {
-        if (kind === "assumption") {
-          const n = listEvidence(db, i.id).length;
-          return `- ${i.title} [${i.status}, ${i.confidence} confidence, ${n === 0 ? "no evidence" : `${n} piece${n === 1 ? "" : "s"} of evidence`}]`;
-        }
-        return `- ${i.title}${i.kind === "insight" ? " [founder-reported]" : ""}`;
-      });
-    return lines.length ? [`${KIND_LABELS[kind].plural}:\n${lines.join("\n")}`] : [];
+function memorySection(retrieved: ReturnType<typeof retrieve>): { text: string | null; used: ReturnType<typeof retrieve> } {
+  const used: typeof retrieved = [];
+  const lines: string[] = [];
+  let tokens = 0;
+  for (const r of retrieved) {
+    const line = memoryLine(r);
+    const t = estimateTokens(line);
+    if (tokens + t > BUDGETS.memory) break;
+    tokens += t;
+    lines.push(line);
+    used.push(r);
+  }
+  if (!lines.length) return { text: null, used };
+  return {
+    used,
+    text: `## Relevant recorded knowledge
+Treat each line by its label. An assumption is a belief to test, not a fact, whatever its confidence; "validated" is the only status meaning the founder accepts it as established. Say so when advice leans on an untested assumption, and when new information conflicts with something here.
+
+${lines.join("\n")}`,
+  };
+}
+
+function recallSection(db: Db, conversationId: string | null): string | null {
+  const convs = recentConversations(db, conversationId ?? "", 4);
+  const events = recentEvents(db, 8);
+  const parts: string[] = [];
+  if (convs.length) {
+    parts.push(
+      "Recent conversations:\n" +
+        convs
+          .map((c) => {
+            const msgs = listMessages(db, c.id);
+            const gist = c.summary || msgs.slice(-2).map((m) => `${m.role === "user" ? "Founder" : "Co-founder"}: ${m.content.slice(0, 200)}`).join(" / ");
+            return `- "${c.title}" (${c.updatedAt.slice(0, 10)}): ${gist.slice(0, 400)}`;
+          })
+          .join("\n"),
+    );
+  }
+  if (events.length) parts.push("Recent changes to memory:\n" + events.map((e) => `- ${e.createdAt.slice(0, 10)} ${e.actor === "agent" ? "(you)" : "(founder)"} ${e.summary}`).join("\n"));
+  return parts.length ? truncateToTokens(`## Where things were left\n${parts.join("\n\n")}`, BUDGETS.recall) : null;
+}
+
+/** The raw messages to send: everything the summary doesn't cover, within a token budget. */
+function historyWindow(conv: Conversation | null, stored: Message[]): ChatMessage[] {
+  const start = Math.max(conv?.summaryCount ?? 0, stored.length - MAX_RAW_MESSAGES, 0);
+  const msgs: ChatMessage[] = stored.slice(start).map((m) => ({ role: m.role, content: m.content }));
+  let tokens = msgs.reduce((n, m) => n + estimateTokens(m.content), 0);
+  while (msgs.length > 1 && tokens > BUDGETS.history) tokens -= estimateTokens(msgs.shift()!.content);
+  while (msgs.length > 1 && msgs[0].role !== "user") msgs.shift(); // the API needs the first message to be the user's
+  return msgs;
+}
+
+export interface BuildInput {
+  conversation: Conversation | null;
+  /** All stored messages of the conversation, including the one being answered. */
+  stored: Message[];
+  intent: Intent;
+}
+
+/**
+ * Assembles what the model sees for one turn: persona, who the founder is, the startup and its brief,
+ * the memory relevant to *this* message, and a bounded slice of the conversation. Returns a trace of
+ * exactly what went in, so the choice is inspectable.
+ */
+export function buildContext(db: Db, input: BuildInput): BuiltContext {
+  const { intent, conversation, stored } = input;
+  const sections: Array<{ name: string; text: string }> = [{ name: "persona", text: SYSTEM_PROMPT }];
+
+  const founder = founderSection(db);
+  sections.push({ name: "founder", text: founder.text });
+  const startup = readActiveStartup(db);
+  sections.push({ name: "startup", text: startupSection(db) });
+
+  const brief = latestBrief(db);
+  if (brief) {
+    sections.push({
+      name: "brief",
+      text: `## Startup brief (version ${brief.version}, ${brief.createdAt.slice(0, 10)})\nYour own running summary of the company. It can lag behind the lists above and below.\n\n${truncateToTokens(brief.content, BUDGETS.brief)}`,
+    });
+  }
+
+  const memory = memorySection(retrieve(db, intent));
+  if (memory.text) sections.push({ name: "memory", text: memory.text });
+
+  if (intent.recall) {
+    const recall = recallSection(db, conversation?.id ?? null);
+    if (recall) sections.push({ name: "recall", text: recall });
+  }
+  if (conversation?.summary) {
+    sections.push({ name: "summary", text: truncateToTokens(`## Earlier in this conversation\n${conversation.summary}`, BUDGETS.summary) });
+  }
+
+  const guidance = [MODE_GUIDANCE[intent.mode]];
+  if (!startup && founder.filledFields < SPARSE_FOUNDER_FIELDS) {
+    guidance.push(
+      "You are still getting to know the founder. Answer what they ask, and also weave in one or two natural discovery questions (interests, skills, resources, constraints, problems they've noticed). Never ask more than two questions at once, and never present a questionnaire.",
+    );
+  }
+  if (memory.text) guidance.push(CITE_RULE);
+  sections.push({ name: "guidance", text: `## This conversation\n${guidance.join("\n")}` });
+
+  const history = historyWindow(conversation, stored);
+  const system = sections.map((s) => s.text).join("\n\n");
+
+  const refs: BuiltContext["refs"] = {};
+  const items: TraceItem[] = memory.used.map((r) => {
+    const ref = refFor(r.item.id);
+    refs[ref] = { id: r.item.id, kind: r.item.kind, title: r.item.title };
+    return { ref, id: r.item.id, kind: KIND_LABELS[r.item.kind].singular, title: r.item.title, status: r.item.status, reason: r.reason };
   });
 
-  return `## What we have recorded so far
-Treat each line according to its label. An assumption is a belief to test, not a fact, whatever its confidence; "validated" is the only status that means the founder has accepted it as established. Point out when advice leans on an untested assumption, and when new information conflicts with something here.
+  const sectionTokens = sections.map((s) => ({ name: s.name, tokens: estimateTokens(s.text) }));
+  const historyTokens = history.reduce((n, m) => n + estimateTokens(m.content), 0);
+  sectionTokens.push({ name: "history", tokens: historyTokens });
 
-${sections.join("\n\n")}`;
+  return {
+    system,
+    messages: history,
+    refs,
+    trace: {
+      intent,
+      sections: sectionTokens,
+      items,
+      historyMessages: history.length,
+      summarizedMessages: conversation?.summaryCount ?? 0,
+      briefVersion: brief?.version ?? null,
+      totalTokens: sectionTokens.reduce((n, s) => n + s.tokens, 0),
+    },
+  };
 }
+
+/** System prompt for a conversation-less context (tests, evals): REVIEW mode, everything relevant. */
+export function buildSystemPrompt(db: Db, intent?: Partial<Intent>): string {
+  const startup = readActiveStartup(db);
+  const base: Intent = { mode: startup ? "REVIEW" : "DISCOVER", kinds: [], keywords: [], recall: false, source: "fallback", ...intent };
+  return buildContext(db, { conversation: null, stored: [], intent: base }).system;
+}
+

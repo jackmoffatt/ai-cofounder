@@ -1,17 +1,29 @@
 "use client";
 
 import { PanelLeft } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { IconButton } from "@/components/ui/IconButton";
 import { TooltipProvider } from "@/components/ui/Tooltip";
 import { cn } from "@/lib/cn";
+import { toggleDebugMode, useDebugMode } from "@/lib/useDebugMode";
 
 /** Sidebar + main area. On narrow screens the sidebar becomes an overlay drawer. */
 export function AppShell({ children }: { children: ReactNode }) {
   // Separate state per breakpoint: sidebar starts open on desktop, closed as a drawer on mobile.
   const [desktopOpen, setDesktopOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const debug = useDebugMode();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        toggleDebugMode();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const toggle = () => {
     setDesktopOpen((o) => !o);
     setMobileOpen((o) => !o);
@@ -45,6 +57,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               <PanelLeft size={16} />
             </IconButton>
           </div>
+          {debug && (
+            <span className="absolute right-3 top-3 z-10 rounded-sm bg-surface-2 px-2 py-0.5 text-xs text-muted" title="Developer mode (Ctrl/Cmd+Shift+D to turn off)">
+              Debug
+            </span>
+          )}
           {children}
         </main>
       </div>
