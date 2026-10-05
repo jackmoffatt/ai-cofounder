@@ -50,12 +50,13 @@ export interface TraceView {
   context: ContextTrace;
   memoryChanges: string[];
   proposals: string[];
+  tools: Array<{ name: string; args: string; ok: boolean; ms: number }>;
 }
 
 export function traceViewForMessage(db: Db, messageId: string): TraceView | null {
   const t = getTraceForMessage(db, messageId);
   if (!t) return null;
-  const out = JSON.parse(t.outputs) as { memoryEventIds?: string[]; proposalIds?: string[] };
+  const out = JSON.parse(t.outputs) as { memoryEventIds?: string[]; proposalIds?: string[]; tools?: TraceView["tools"] };
   return {
     mode: t.mode,
     model: t.model,
@@ -66,5 +67,6 @@ export function traceViewForMessage(db: Db, messageId: string): TraceView | null
     context: JSON.parse(t.context) as ContextTrace,
     memoryChanges: getEvents(db, out.memoryEventIds ?? []).map((e) => e.summary),
     proposals: getProposalRows(db, out.proposalIds ?? []).map((p) => p.summary),
+    tools: out.tools ?? [],
   };
 }

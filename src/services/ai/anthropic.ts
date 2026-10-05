@@ -1,12 +1,33 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { ZodType } from "zod";
-import { AIError, type AIProvider, type ChatEvent, type ChatRequest, type StopReason, type Usage } from "./types";
+import { AIError, type AIProvider, type ChatEvent, type ChatMessage, type ChatRequest, type StopReason, type Usage } from "./types";
 
 function mapStopReason(reason: string | null | undefined): StopReason {
-  if (reason === "end_turn" || reason === "max_tokens" || reason === "refusal") return reason;
+  if (reason === "end_turn" || reason === "max_tokens" || reason === "refusal" || reason === "tool_use") return reason;
   return "other";
 }
+
+/** App messages to API messages. An assistant turn with native content is replayed exactly as received. */
+function toApiMessages(messages: ChatMessage[]) {
+  return messages.map((m) => {
+    if (m.role === "assistant" && m.native) return { role: "assistant" as const, content: m.native as never };
+    if (typeof m.content === "string") return { role: m.role, content: m.content };
+    return {
+      role: m.role,
+      content: m.content.map((p) =>
+        p.type === "text"
+          ? { type: "text" as const, text: p.text }
+          : p.type === "tool_use"
+            ? { type: "tool_use" as const, id: p.id, name: p.name, input: p.input }
+            : { type: "tool_result" as const, tool_use_id: p.toolUseId, content: p.content, ...(p.isError ? { is_error: true } : {}) },
+      ),
+    };
+  }) as never;
+}
+
+const toApiTools = (tools: ChatRequest["tools"]) =>
+  tools?.length ? tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as never })) : undefined;
 
 function mapError(err: unknown): AIError {
   if (err instanceof AIError) return err;
@@ -39,7 +60,8 @@ export class AnthropicProvider implements AIProvider {
           model: req.model,
           max_tokens: req.maxTokens,
           system: req.system,
-          messages: req.messages,
+          messages: toApiMessages(req.messages),
+          ...(toApiTools(req.tools) ? { tools: toApiTools(req.tools) } : {}),
           ...(req.effort ? { output_config: { effort: req.effort } } : {}),
           betas: ["server-side-fallback-2026-07-01"],
           fallbacks: "default",
@@ -52,8 +74,12 @@ export class AnthropicProvider implements AIProvider {
         }
       }
       const final = await stream.finalMessage();
+      for (const block of final.content) {
+        if (block.type === "tool_use") yield { type: "tool_call", id: block.id, name: block.name, input: block.input };
+      }
       yield {
         type: "done",
+        native: final.stop_reason === "tool_use" ? final.content : undefined,
         stopReason: mapStopReason(final.stop_reason),
         usage: { inputTokens: final.usage.input_tokens, outputTokens: final.usage.output_tokens },
         model: final.model,
@@ -70,7 +96,7 @@ export class AnthropicProvider implements AIProvider {
           model: req.model,
           max_tokens: req.maxTokens,
           system: req.system,
-          messages: req.messages,
+          messages: toApiMessages(req.messages),
           ...(req.effort ? { output_config: { effort: req.effort } } : {}),
         },
         { signal: req.signal },
@@ -89,7 +115,7 @@ export class AnthropicProvider implements AIProvider {
           model: req.model,
           max_tokens: req.maxTokens,
           system: req.system,
-          messages: req.messages,
+          messages: toApiMessages(req.messages),
           output_config: { format: zodOutputFormat(schema as never), ...(req.effort ? { effort: req.effort } : {}) },
         },
         { signal: req.signal },

@@ -7,6 +7,7 @@ import { EditableField } from "@/components/ui/EditableField";
 import { CONFIDENCES, KIND_LABELS, STATUSES } from "@/lib/memory";
 import { api, notifyMemoryChanged, timeAgo } from "@/lib/memoryClient";
 import type { ItemDetail } from "@/services/memory/view";
+import { ResearchSection } from "./ResearchSection";
 
 const selectClass =
   "mt-1 block h-8 w-full rounded-md border border-line bg-surface px-2 text-sm focus:border-accent focus:outline-none";
@@ -44,6 +45,7 @@ export function ItemPanel({ itemId, onDeleted, onChanged }: { itemId: string; on
 
   const patch = (p: object) => run(() => api<{ item: ItemDetail }>("PATCH", `/api/memory/items/${item.id}`, p));
   const isAssumption = item.kind === "assumption";
+  const isResearch = item.kind === "research";
 
   return (
     <div className="space-y-5">
@@ -52,116 +54,123 @@ export function ItemPanel({ itemId, onDeleted, onChanged }: { itemId: string; on
         <EditableField label="Statement" value={item.title} rows={2} onSave={async (v) => void (await patch({ title: v }))} />
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        <label className="text-xs text-muted">
-          Status
-          <select className={selectClass} value={item.status} onChange={(e) => void patch({ status: e.target.value })}>
-            {STATUSES[item.kind].map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-muted">
-          Confidence
-          <select className={selectClass} value={item.confidence} onChange={(e) => void patch({ confidence: e.target.value })}>
-            {CONFIDENCES.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-muted">
-          Importance
-          <select className={selectClass} value={item.importance} onChange={(e) => void patch({ importance: Number(e.target.value) })}>
-            {[1, 2, 3, 4, 5].map((n) => (
-              <option key={n}>{n}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {isAssumption && (
-        <p className="text-xs text-muted">
-          Status and confidence follow the evidence below. Validated and rejected are your call: set them yourself once the
-          evidence convinces you.
-        </p>
-      )}
-
-      {item.kind === "decision" ? (
-        <>
-          <EditableField
-            label="Why we decided this"
-            value={String(item.data.reasoning ?? item.body ?? "")}
-            rows={3}
-            onSave={async (v) => void (await patch({ data: { reasoning: v } }))}
-          />
-          <EditableField
-            label="Alternatives considered"
-            hint="One per line."
-            value={Array.isArray(item.data.alternatives) ? (item.data.alternatives as string[]).join("\n") : ""}
-            rows={2}
-            onSave={async (v) => void (await patch({ data: { alternatives: v.split("\n").map((l) => l.trim()).filter(Boolean) } }))}
-          />
-        </>
+      {isResearch ? (
+        <ResearchSection item={item} />
       ) : (
-        <EditableField label="Notes" value={item.body} rows={3} onSave={async (v) => void (await patch({ body: v }))} />
-      )}
-
-      {isAssumption && (
-        <section aria-label="Evidence">
-          <h3 className="text-sm font-medium">Evidence</h3>
-          {item.evidence.length === 0 ? (
-            <p className="mt-1 text-sm text-muted">None yet. This is still just a belief.</p>
-          ) : (
-            <ul className="mt-2 space-y-2">
-              {item.evidence.map((e) => (
-                <li key={e.id} className="rounded-md bg-surface-2 px-3 py-2 text-sm">
-                  <p className="text-xs text-muted">
-                    {e.stance === "supports" ? "Supports" : "Weakens"} · {e.strength} · {e.createdBy === "agent" ? "from chat" : "added by you"}
-                  </p>
-                  <p>{e.excerpt}</p>
-                  <button
-                    className="mt-1 text-xs text-muted underline-offset-2 hover:text-fg hover:underline"
-                    onClick={() => void run(async () => (await api("DELETE", `/api/memory/evidence/${e.id}`), api<{ item: ItemDetail }>("GET", `/api/memory/items/${item.id}`)))}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            <label className="text-xs text-muted">
+              Status
+              <select className={selectClass} value={item.status} onChange={(e) => void patch({ status: e.target.value })}>
+                {STATUSES[item.kind].map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-muted">
+              Confidence
+              <select className={selectClass} value={item.confidence} onChange={(e) => void patch({ confidence: e.target.value })}>
+                {CONFIDENCES.map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-muted">
+              Importance
+              <select className={selectClass} value={item.importance} onChange={(e) => void patch({ importance: Number(e.target.value) })}>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {isAssumption && (
+            <p className="text-xs text-muted">
+              Status and confidence follow the evidence below. Validated and rejected are your call: set them yourself once the
+              evidence convinces you.
+            </p>
           )}
-          <form
-            className="mt-3 space-y-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!ev.excerpt.trim()) return;
-              void run(() => api<{ item: ItemDetail }>("POST", `/api/memory/items/${item.id}/evidence`, ev)).then(() =>
-                setEv((p) => ({ ...p, excerpt: "" })),
-              );
-            }}
-          >
-            <div className="grid grid-cols-2 gap-2">
-              <select aria-label="Stance" className={selectClass} value={ev.stance} onChange={(e) => setEv({ ...ev, stance: e.target.value })}>
-                <option value="supports">Supports</option>
-                <option value="weakens">Weakens</option>
-              </select>
-              <select aria-label="Strength" className={selectClass} value={ev.strength} onChange={(e) => setEv({ ...ev, strength: e.target.value })}>
-                <option value="anecdotal">Anecdotal</option>
-                <option value="moderate">Moderate</option>
-                <option value="strong">Strong</option>
-              </select>
-            </div>
-            <textarea
-              aria-label="What did you observe?"
-              placeholder="What did you observe? e.g. 7 of 10 interviewees mentioned it"
-              value={ev.excerpt}
-              onChange={(e) => setEv({ ...ev, excerpt: e.target.value })}
-              rows={2}
-              className="block w-full resize-none rounded-md border border-line bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
-            />
-            <Button type="submit" disabled={!ev.excerpt.trim()}>
-              Add evidence
-            </Button>
-          </form>
-        </section>
+
+          {item.kind === "decision" ? (
+            <>
+              <EditableField
+                label="Why we decided this"
+                value={String(item.data.reasoning ?? item.body ?? "")}
+                rows={3}
+                onSave={async (v) => void (await patch({ data: { reasoning: v } }))}
+              />
+              <EditableField
+                label="Alternatives considered"
+                hint="One per line."
+                value={Array.isArray(item.data.alternatives) ? (item.data.alternatives as string[]).join("\n") : ""}
+                rows={2}
+                onSave={async (v) => void (await patch({ data: { alternatives: v.split("\n").map((l) => l.trim()).filter(Boolean) } }))}
+              />
+            </>
+          ) : (
+            <EditableField label="Notes" value={item.body} rows={3} onSave={async (v) => void (await patch({ body: v }))} />
+          )}
+
+          {isAssumption && (
+            <section aria-label="Evidence">
+              <h3 className="text-sm font-medium">Evidence</h3>
+              {item.evidence.length === 0 ? (
+                <p className="mt-1 text-sm text-muted">None yet. This is still just a belief.</p>
+              ) : (
+                <ul className="mt-2 space-y-2">
+                  {item.evidence.map((e) => (
+                    <li key={e.id} className="rounded-md bg-surface-2 px-3 py-2 text-sm">
+                      <p className="text-xs text-muted">
+                        {e.stance === "supports" ? "Supports" : "Weakens"} · {e.strength} · {e.origin === "research" ? "from research" : e.createdBy === "agent" ? "from chat" : "added by you"}
+                      </p>
+                      <p>{e.excerpt}</p>
+                      <button
+                        className="mt-1 text-xs text-muted underline-offset-2 hover:text-fg hover:underline"
+                        onClick={() => void run(async () => (await api("DELETE", `/api/memory/evidence/${e.id}`), api<{ item: ItemDetail }>("GET", `/api/memory/items/${item.id}`)))}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <form
+                className="mt-3 space-y-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!ev.excerpt.trim()) return;
+                  void run(() => api<{ item: ItemDetail }>("POST", `/api/memory/items/${item.id}/evidence`, ev)).then(() =>
+                    setEv((p) => ({ ...p, excerpt: "" })),
+                  );
+                }}
+              >
+                <div className="grid grid-cols-2 gap-2">
+                  <select aria-label="Stance" className={selectClass} value={ev.stance} onChange={(e) => setEv({ ...ev, stance: e.target.value })}>
+                    <option value="supports">Supports</option>
+                    <option value="weakens">Weakens</option>
+                  </select>
+                  <select aria-label="Strength" className={selectClass} value={ev.strength} onChange={(e) => setEv({ ...ev, strength: e.target.value })}>
+                    <option value="anecdotal">Anecdotal</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="strong">Strong</option>
+                  </select>
+                </div>
+                <textarea
+                  aria-label="What did you observe?"
+                  placeholder="What did you observe? e.g. 7 of 10 interviewees mentioned it"
+                  value={ev.excerpt}
+                  onChange={(e) => setEv({ ...ev, excerpt: e.target.value })}
+                  rows={2}
+                  className="block w-full resize-none rounded-md border border-line bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
+                />
+                <Button type="submit" disabled={!ev.excerpt.trim()}>
+                  Add evidence
+                </Button>
+              </form>
+            </section>
+          )}
+
+        </>
       )}
 
       <section aria-label="Source">
@@ -169,7 +178,9 @@ export function ItemPanel({ itemId, onDeleted, onChanged }: { itemId: string; on
         <p className="mt-1 text-sm text-muted">
           {item.origin === "manual"
             ? "You added this."
-            : item.provenance.conversationId
+            : item.origin === "research"
+              ? "Found by web research"
+              : item.provenance.conversationId
               ? "Saved from a conversation"
               : "Saved from a conversation that no longer exists"}
           {item.provenance.conversationId && (

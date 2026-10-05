@@ -97,7 +97,7 @@ export const memoryItems = sqliteTable(
     ownerId: text("owner_id").notNull().default(LOCAL_OWNER),
     /** Null until an idea becomes an established startup. */
     startupId: text("startup_id"),
-    kind: text("kind", { enum: ["assumption", "decision", "question", "idea", "insight", "note"] }).notNull(),
+    kind: text("kind", { enum: ["assumption", "decision", "question", "idea", "insight", "note", "research"] }).notNull(),
     title: text("title").notNull(),
     body: text("body").notNull().default(""),
     /** Vocabulary depends on kind; validated in services/memory/items.ts. */
@@ -289,3 +289,73 @@ export const taskDeps = sqliteTable(
 export type Objective = typeof objectives.$inferSelect;
 export type Experiment = typeof experiments.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
+
+/** A web page we fetched. Findings quote these, so the text is kept (capped) to verify quotes against. */
+export const sources = sqliteTable(
+  "sources",
+  {
+    id: text("id").primaryKey(),
+    url: text("url").notNull(),
+    title: text("title").notNull().default(""),
+    /** Hostname without "www.". */
+    publisher: text("publisher").notNull().default(""),
+    fetchedAt: text("fetched_at").notNull(),
+    contentHash: text("content_hash").notNull().default(""),
+    text: text("text").notNull().default(""),
+    ok: integer("ok", { mode: "boolean" }).notNull().default(true),
+    error: text("error").notNull().default(""),
+  },
+  (t) => [index("sources_url_idx").on(t.url)],
+);
+
+/** Which sources back a research finding, and the quote that proves it. */
+export const researchSources = sqliteTable(
+  "research_sources",
+  {
+    itemId: text("item_id")
+      .notNull()
+      .references(() => memoryItems.id, { onDelete: "cascade" }),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "cascade" }),
+    quote: text("quote").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.itemId, t.sourceId] })],
+);
+
+export const competitors = sqliteTable(
+  "competitors",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().default(LOCAL_OWNER),
+    startupId: text("startup_id"),
+    company: text("company").notNull(),
+    product: text("product").notNull().default(""),
+    targetCustomer: text("target_customer").notNull().default(""),
+    valueProposition: text("value_proposition").notNull().default(""),
+    pricing: text("pricing").notNull().default(""),
+    businessModel: text("business_model").notNull().default(""),
+    strengths: text("strengths").notNull().default(""),
+    weaknesses: text("weaknesses").notNull().default(""),
+    /** JSON: { field: [{ sourceId, quote }] }. Every filled field must have at least one. */
+    fieldSources: text("field_sources").notNull().default(sql`'{}'`),
+    lastResearched: text("last_researched").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("competitors_company_idx").on(t.company)],
+);
+
+/** Requests to do something consequential outside the app. Nothing creates these yet; the gate exists first. */
+export const approvals = sqliteTable("approvals", {
+  id: text("id").primaryKey(),
+  tool: text("tool").notNull(),
+  args: text("args").notNull(),
+  summary: text("summary").notNull(),
+  status: text("status", { enum: ["pending", "approved", "denied"] }).notNull().default("pending"),
+  requestedAt: text("requested_at").notNull(),
+  decidedAt: text("decided_at"),
+});
+
+export type Source = typeof sources.$inferSelect;
+export type Competitor = typeof competitors.$inferSelect;
+export type Approval = typeof approvals.$inferSelect;

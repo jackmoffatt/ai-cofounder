@@ -23,12 +23,12 @@ beforeEach(() => {
   db = createDb(":memory:");
 });
 
-const intent = (p: Partial<Intent> = {}): Intent => ({ mode: "REVIEW", kinds: [], keywords: [], recall: false, wantsPlan: false, source: "model", ...p });
+const intent = (p: Partial<Intent> = {}): Intent => ({ mode: "REVIEW", kinds: [], keywords: [], recall: false, wantsPlan: false, needsResearch: false, source: "model", ...p });
 const mk = (kind: Parameters<typeof createItem>[1]["kind"], title: string, importance = 3, body = "") =>
   createItem(db, { kind, title, importance, body, origin: "manual", createdBy: "user" }).item;
 
 describe("classifyIntent", () => {
-  const modelSays = { mode: "VALIDATE", kinds: ["assumption"], keywords: ["students"], recall: false, wantsPlan: false };
+  const modelSays = { mode: "VALIDATE", kinds: ["assumption"], keywords: ["students"], recall: false, wantsPlan: false, needsResearch: false };
 
   it("uses the model's classification", async () => {
     const provider = new FakeProvider({ structuredResult: modelSays });
@@ -304,7 +304,7 @@ describe("Startup Brief", () => {
 
 describe("a chat turn leaves a trace", () => {
   const dispatch = (req: { system: string }) => {
-    if (req.system.includes("You route one message")) return { mode: "VALIDATE", kinds: [], keywords: ["scheduling"], recall: false, wantsPlan: false };
+    if (req.system.includes("You route one message")) return { mode: "VALIDATE", kinds: [], keywords: ["scheduling"], recall: false, wantsPlan: false, needsResearch: false };
     if (req.system.includes("You write the Startup Brief")) return briefOut;
     return emptyExtraction();
   };

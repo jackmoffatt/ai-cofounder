@@ -13,6 +13,7 @@ export function ChatInput({
   disabled,
   placeholder = "Ask your startup agent…",
   autoFocus,
+  initialValue,
   streaming,
   onStop,
 }: {
@@ -20,11 +21,13 @@ export function ChatInput({
   disabled?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
+  /** Text to start with (the founder still has to send it). */
+  initialValue?: string;
   /** While true the send button becomes a stop button. */
   streaming?: boolean;
   onStop?: () => void;
 }) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(initialValue ?? "");
   const ref = useRef<HTMLTextAreaElement>(null);
   const canSend = value.trim().length > 0 && !disabled && !streaming;
 

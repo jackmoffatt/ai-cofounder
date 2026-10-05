@@ -1,5 +1,6 @@
 import type { Db } from "@/db/client";
 import { getItem, listEvidence, listItems, searchItemIds } from "@/db/queries/memory";
+import { sourcesNote } from "@/services/research/sources";
 import type { MemoryItem } from "@/db/schema";
 import { INACTIVE_STATUSES, type ItemKind } from "@/lib/memory";
 import type { Mode } from "@/lib/modes";
@@ -13,6 +14,8 @@ export interface Retrieved {
   reason: Reason;
   score: number;
   evidenceCount: number;
+  /** For research findings: where it came from, e.g. "acme.com, 2026-10-05". */
+  sourceNote?: string;
 }
 
 interface Slot {
@@ -39,24 +42,28 @@ const RECIPES: Record<Mode, Slot[]> = {
     { kind: "question", cap: 6 },
     { kind: "assumption", statuses: OPEN_ASSUMPTIONS, cap: 6 },
     { kind: "insight", cap: 4 },
+    { kind: "research", cap: 8 },
   ],
   STRATEGY: [
     { kind: "decision", cap: 6 },
     { kind: "assumption", statuses: OPEN_ASSUMPTIONS, cap: 6 },
     { kind: "idea", cap: 3 },
     { kind: "insight", cap: 4 },
+    { kind: "research", cap: 3 },
   ],
   VALIDATE: [
     { kind: "assumption", statuses: OPEN_ASSUMPTIONS, cap: 8 },
     { kind: "insight", cap: 5 },
     { kind: "question", cap: 4 },
     { kind: "decision", cap: 2 },
+    { kind: "research", cap: 3 },
   ],
   PRODUCT: [
     { kind: "decision", cap: 5 },
     { kind: "assumption", statuses: OPEN_ASSUMPTIONS, cap: 5 },
     { kind: "insight", cap: 5 },
     { kind: "idea", cap: 3 },
+    { kind: "research", cap: 3 },
   ],
   BUILD: [
     { kind: "decision", cap: 6 },
@@ -68,6 +75,7 @@ const RECIPES: Record<Mode, Slot[]> = {
     { kind: "assumption", statuses: OPEN_ASSUMPTIONS, cap: 5 },
     { kind: "decision", cap: 4 },
     { kind: "question", cap: 3 },
+    { kind: "research", cap: 3 },
   ],
   REVIEW: [
     { kind: "decision", cap: 5 },
@@ -75,6 +83,7 @@ const RECIPES: Record<Mode, Slot[]> = {
     { kind: "question", cap: 5 },
     { kind: "insight", cap: 3 },
     { kind: "idea", cap: 3 },
+    { kind: "research", cap: 2 },
   ],
 };
 
@@ -96,7 +105,8 @@ export function retrieve(db: Db, intent: Intent, limit = MAX_RETRIEVED): Retriev
   const add = (item: MemoryItem, reason: Reason, score: number) => {
     const existing = picked.get(item.id);
     if (existing && existing.score >= score) return;
-    picked.set(item.id, { item, reason: existing?.reason === "keyword" ? "keyword" : reason, score, evidenceCount: evCount(item.id) });
+    const sourceNote = item.kind === "research" ? sourcesNote(db, item.id) : undefined;
+    picked.set(item.id, { item, reason: existing?.reason === "keyword" ? "keyword" : reason, score, evidenceCount: evCount(item.id), sourceNote });
   };
 
   const slots = [...RECIPES[intent.mode]];

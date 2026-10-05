@@ -37,6 +37,8 @@ export interface NewItem {
   supersedesId?: string | null;
   /** Why it was saved (a quote from the founder, usually). Shown in the audit trail. */
   reason?: string;
+  /** Only honoured for research findings, whose confidence comes from their sources. Everything else starts low. */
+  confidence?: Confidence;
 }
 
 const clampImportance = (n: number | undefined) => Math.min(5, Math.max(1, Math.round(n ?? 3)));
@@ -57,7 +59,7 @@ export function createItem(db: Db, input: NewItem): { item: MemoryItem; event: M
     title,
     body: (input.body ?? "").trim().slice(0, 4000),
     status: STATUSES[input.kind][0],
-    confidence: "low",
+    confidence: input.kind === "research" ? (input.confidence ?? "low") : "low",
     importance: clampImportance(input.importance),
     data: JSON.stringify(input.data ?? {}),
     origin: input.origin,

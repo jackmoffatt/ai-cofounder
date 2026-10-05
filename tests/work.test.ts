@@ -258,7 +258,7 @@ describe("work in context and brief", () => {
 
 describe("a planning turn", () => {
   const dispatch = (planReturned: boolean) => (req: { system: string }) => {
-    if (req.system.includes("You route one message")) return { mode: "VALIDATE", kinds: [], keywords: [], recall: false, wantsPlan: true };
+    if (req.system.includes("You route one message")) return { mode: "VALIDATE", kinds: [], keywords: [], recall: false, wantsPlan: true, needsResearch: false };
     if (req.system.includes("convert a validation plan")) {
       return { plan: planReturned ? { ...plan(), assumptions: [{ target: null, title: "Students lose time" }] } : null };
     }

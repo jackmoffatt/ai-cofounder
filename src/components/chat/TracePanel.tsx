@@ -78,6 +78,20 @@ export function TracePanel({ messageId }: { messageId: string }) {
         </p>
       </section>
 
+      {trace.tools.length > 0 && (
+        <section>
+          <h3 className="font-medium">Tools called</h3>
+          <ul className="mt-1 space-y-1 text-muted">
+            {trace.tools.map((t, i) => (
+              <li key={i}>
+                <span className="text-fg">{t.name}</span> · {t.ok ? "ok" : "failed"} · {(t.ms / 1000).toFixed(1)}s
+                <span className="block break-all text-xs">{t.args}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section>
         <h3 className="font-medium">Memory written</h3>
         {trace.memoryChanges.length + trace.proposals.length === 0 ? (

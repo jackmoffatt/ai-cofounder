@@ -1,4 +1,4 @@
-export const ITEM_KINDS = ["assumption", "decision", "question", "idea", "insight", "note"] as const;
+export const ITEM_KINDS = ["assumption", "decision", "question", "idea", "insight", "note", "research"] as const;
 export type ItemKind = (typeof ITEM_KINDS)[number];
 
 export const KIND_LABELS: Record<ItemKind, { singular: string; plural: string }> = {
@@ -8,6 +8,7 @@ export const KIND_LABELS: Record<ItemKind, { singular: string; plural: string }>
   idea: { singular: "Idea", plural: "Ideas" },
   insight: { singular: "Customer insight", plural: "Customer insights" },
   note: { singular: "Note", plural: "Notes" },
+  research: { singular: "Research finding", plural: "Research" },
 };
 
 /** Allowed statuses per kind. The first entry is the default for new items. */
@@ -18,6 +19,7 @@ export const STATUSES: Record<ItemKind, readonly string[]> = {
   idea: ["raw", "exploring", "promoted", "discarded"],
   insight: ["active", "archived"],
   note: ["active", "archived"],
+  research: ["active", "archived"],
 };
 
 export const CONFIDENCES = ["low", "medium", "high"] as const;

@@ -4,6 +4,7 @@ import { insertBrief, latestBrief } from "@/db/queries/context";
 import { countEventsSince, countStrategicEventsSince, listEvidence, listItems } from "@/db/queries/memory";
 import type { MemoryItem, StartupBrief } from "@/db/schema";
 import { INACTIVE_STATUSES, refFor } from "@/lib/memory";
+import { sourcesNote } from "@/services/research/sources";
 import { FOUNDER_FIELDS, STARTUP_FIELDS, founderFieldCount, stageLabel } from "@/lib/profile";
 import { modelFor } from "@/services/ai/models";
 import type { AIProvider } from "@/services/ai/types";
@@ -38,6 +39,7 @@ Write the NARRATIVE in markdown, under 600 words, using only these headings, in 
 ## Major risks
 
 STRICT EPISTEMIC RULES:
+- Items labelled RESEARCH are claims from web pages, with their sources. They are sourced, not validated: state them with attribution ("According to acme.com…") and their confidence, and never as the founder's validated fact.
 - Everything in the input comes with a status. Only items marked VALIDATED may be stated as established fact. Everything else (including the founder's own description of the problem, customer, market or solution) is a belief: phrase it as "The founder believes…", "We're assuming…" or "Untested:". Never write an untested or testing assumption as a fact, even if it sounds obvious.
 - Where nothing is known, write "Unknown" or "Not yet researched". Never invent facts, numbers, competitors, customers or sources.
 - Prefer one clear sentence over padding. No praise, no marketing language.
@@ -45,8 +47,8 @@ STRICT EPISTEMIC RULES:
 
 NEXT ACTION: the single highest-value thing to do next, given the stage, objective, what is uncertain and what has been tried. It must be concrete and doable within about a week, favour gathering evidence over more analysis, and usually target the riskiest important untested assumption. "why" is one or two sentences.`;
 
-const label = (i: MemoryItem, evidence: number) =>
-  `[m:${refFor(i.id)}] ${i.title} — ${i.kind}, ${i.status === "validated" ? "VALIDATED" : i.status}${i.kind === "assumption" ? `, ${i.confidence} confidence, ${evidence} evidence` : ""}`;
+const label = (db: Db, i: MemoryItem, evidence: number) =>
+  `[m:${refFor(i.id)}] ${i.title} — ${i.kind === "research" ? "RESEARCH (sourced, not validated)" : i.kind}, ${i.status === "validated" ? "VALIDATED" : i.status}${i.kind === "assumption" ? `, ${i.confidence} confidence, ${evidence} evidence` : ""}${i.kind === "research" ? `, ${i.confidence} confidence, source: ${sourcesNote(db, i.id) || "none on file"}` : ""}`;
 
 function liveItems(db: Db) {
   return listItems(db).filter((i) => i.kind !== "note");
@@ -93,6 +95,10 @@ export function renderStatusSections(db: Db): string {
   const insights = items.filter((i) => i.kind === "insight" && !INACTIVE_STATUSES.has(i.status)).sort(byImportance).slice(0, 6);
   if (insights.length) out.push(`## Customer insights (founder-reported)\n${insights.map((i) => `- ${i.title} [m:${refFor(i.id)}]`).join("\n")}`);
 
+  const research = items.filter((i) => i.kind === "research" && i.status === "active").sort(byImportance).slice(0, 6);
+  if (research.length) {
+    out.push(`## Research (sourced, not validated)\n${research.map((i) => `- ${i.title} — ${i.confidence} confidence, ${sourcesNote(db, i.id)} [m:${refFor(i.id)}]`).join("\n")}`);
+  }
   const experiments = listExperimentRows(db).filter((e) => e.status === "planned" || e.status === "running").slice(0, 6);
   if (experiments.length) {
     out.push(`## Active experiments\n${experiments.map((e) => `- [${e.status}] ${e.hypothesis}${e.method ? ` — ${e.method}` : ""}`).join("\n")}`);
@@ -126,7 +132,7 @@ function inputFor(db: Db): string {
       items
         .sort((a, b) => b.importance - a.importance)
         .slice(0, 40)
-        .map((i) => `- ${label(i, listEvidence(db, i.id).length)}`)
+        .map((i) => `- ${label(db, i, listEvidence(db, i.id).length)}`)
         .join("\n") || "(none)"
     }`,
   );

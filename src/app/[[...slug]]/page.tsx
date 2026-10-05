@@ -11,9 +11,9 @@ export const dynamic = "force-dynamic";
 
 /** `/` is a new chat; `/c/<id>` is an existing one. One page component serves both so the chat view
  *  stays mounted when a new conversation gets its id mid-stream. */
-export default async function Page({ params }: { params: Promise<{ slug?: string[] }> }) {
+export default async function Page({ params, searchParams }: { params: Promise<{ slug?: string[] }>; searchParams: Promise<{ ask?: string }> }) {
   const { slug } = await params;
-  if (!slug) return <ChatView conversationId={null} initialMessages={[]} />;
+  if (!slug) return <ChatView conversationId={null} initialMessages={[]} initialPrompt={(await searchParams).ask?.slice(0, 500)} />;
 
   const id = slug.length === 2 && slug[0] === "c" ? z.uuid().safeParse(slug[1]) : null;
   if (!id?.success) notFound();

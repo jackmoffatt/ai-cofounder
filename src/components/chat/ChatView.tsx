@@ -22,9 +22,11 @@ const SUGGESTIONS: Array<{ label: string; prompt: string }> = [
 interface Props {
   conversationId: string | null;
   initialMessages: ChatItem[];
+  /** Prefills the message box (e.g. from the Research page). */
+  initialPrompt?: string;
 }
 
-export function ChatView({ conversationId, initialMessages }: Props) {
+export function ChatView({ conversationId, initialMessages, initialPrompt }: Props) {
   const router = useRouter();
   const [items, setItems] = useState<ChatItem[]>(initialMessages);
   const [streaming, setStreaming] = useState(false);
@@ -197,6 +199,7 @@ export function ChatView({ conversationId, initialMessages }: Props) {
           </p>
           <ChatInput
             autoFocus
+            initialValue={initialPrompt}
             streaming={streaming}
             onStop={() => abortRef.current?.abort()}
             onSend={(text) => run(text)}

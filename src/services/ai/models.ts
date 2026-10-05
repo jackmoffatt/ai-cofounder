@@ -1,5 +1,5 @@
 /** Maps what the app needs ("chat", "title", ...) to a concrete model. Override per role via env. */
-export type ModelRole = "chat" | "title" | "extract" | "classify" | "summarize" | "brief" | "plan";
+export type ModelRole = "chat" | "title" | "extract" | "classify" | "summarize" | "brief" | "plan" | "research" | "search";
 
 const DEFAULTS: Record<ModelRole, string> = {
   chat: "claude-opus-5-5",
@@ -9,6 +9,8 @@ const DEFAULTS: Record<ModelRole, string> = {
   summarize: "claude-haiku-4-5",
   brief: "claude-sonnet-5-5",
   plan: "claude-sonnet-5-5",
+  research: "claude-sonnet-5-5",
+  search: "claude-haiku-4-5",
 };
 
 export function modelFor(role: ModelRole): string {

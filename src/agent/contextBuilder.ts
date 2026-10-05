@@ -4,10 +4,10 @@ import { latestBrief } from "@/db/queries/context";
 import { recentEvents } from "@/db/queries/memory";
 import type { Conversation, Message } from "@/db/schema";
 import { KIND_LABELS, refFor } from "@/lib/memory";
-import { MODE_GUIDANCE, PLAN_GUIDANCE } from "@/lib/modes";
+import { MODE_GUIDANCE, PLAN_GUIDANCE, RESEARCH_GUIDANCE } from "@/lib/modes";
 import { FOUNDER_FIELDS, STARTUP_FIELDS, founderFieldCount, stageLabel } from "@/lib/profile";
 import { estimateTokens, truncateToTokens } from "@/lib/tokens";
-import type { ChatMessage } from "@/services/ai/types";
+
 import { readFounder } from "@/services/memory/founder";
 import { readActiveStartup } from "@/services/memory/startup";
 import { listMessages } from "@/db/queries/conversations";
@@ -54,9 +54,15 @@ export interface ContextTrace {
   totalTokens: number;
 }
 
+/** A plain-text conversation message. */
+export interface TextMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface BuiltContext {
   system: string;
-  messages: ChatMessage[];
+  messages: TextMessage[];
   /** handle -> item, so the UI can turn [m:handle] citations into links. */
   refs: Record<string, { id: string; kind: string; title: string }>;
   trace: ContextTrace;
@@ -97,7 +103,8 @@ function startupSection(db: Db): string {
 
 function memoryLine(r: ReturnType<typeof retrieve>[number]): string {
   const { item } = r;
-  const bits = [item.kind === "insight" ? "customer insight, founder-reported" : item.kind, item.status];
+  const bits = [item.kind === "insight" ? "customer insight, founder-reported" : item.kind === "research" ? "web research, not founder-validated" : item.kind, item.status];
+  if (item.kind === "research") bits.push(`${item.confidence} confidence`, r.sourceNote ? `source: ${r.sourceNote}` : "no source on file");
   if (item.kind === "assumption") {
     bits.push(`${item.confidence} confidence`, r.evidenceCount === 0 ? "no evidence" : `${r.evidenceCount} piece${r.evidenceCount === 1 ? "" : "s"} of evidence`);
   }
@@ -192,9 +199,9 @@ export function workSection(db: Db, today = todayLocal()): string | null {
 }
 
 /** The raw messages to send: everything the summary doesn't cover, within a token budget. */
-function historyWindow(conv: Conversation | null, stored: Message[]): ChatMessage[] {
+function historyWindow(conv: Conversation | null, stored: Message[]): TextMessage[] {
   const start = Math.max(conv?.summaryCount ?? 0, stored.length - MAX_RAW_MESSAGES, 0);
-  const msgs: ChatMessage[] = stored.slice(start).map((m) => ({ role: m.role, content: m.content }));
+  const msgs: TextMessage[] = stored.slice(start).map((m) => ({ role: m.role, content: m.content }));
   let tokens = msgs.reduce((n, m) => n + estimateTokens(m.content), 0);
   while (msgs.length > 1 && tokens > BUDGETS.history) tokens -= estimateTokens(msgs.shift()!.content);
   while (msgs.length > 1 && msgs[0].role !== "user") msgs.shift(); // the API needs the first message to be the user's
@@ -251,6 +258,7 @@ export function buildContext(db: Db, input: BuildInput): BuiltContext {
     );
   }
   if (intent.wantsPlan) guidance.push(PLAN_GUIDANCE);
+  if (intent.needsResearch) guidance.push(RESEARCH_GUIDANCE);
   if (memory.text) guidance.push(CITE_RULE);
   sections.push({ name: "guidance", text: `## This conversation\n${guidance.join("\n")}` });
 
@@ -287,7 +295,7 @@ export function buildContext(db: Db, input: BuildInput): BuiltContext {
 /** System prompt for a conversation-less context (tests, evals): REVIEW mode, everything relevant. */
 export function buildSystemPrompt(db: Db, intent?: Partial<Intent>): string {
   const startup = readActiveStartup(db);
-  const base: Intent = { mode: startup ? "REVIEW" : "DISCOVER", kinds: [], keywords: [], recall: false, wantsPlan: false, source: "fallback", ...intent };
+  const base: Intent = { mode: startup ? "REVIEW" : "DISCOVER", kinds: [], keywords: [], recall: false, wantsPlan: false, needsResearch: false, source: "fallback", ...intent };
   return buildContext(db, { conversation: null, stored: [], intent: base }).system;
 }
 

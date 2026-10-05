@@ -1,6 +1,9 @@
 import type { Db } from "@/db/client";
 import { getConversation } from "@/db/queries/conversations";
 import { getItem, listEventsForEntity, listEvidence, listItems } from "@/db/queries/memory";
+import { listCompetitorRows, listSourcesForItem, getSourceRow, type SourceLink } from "@/db/queries/research";
+import { parseFieldSources } from "@/services/research/competitors";
+import type { Competitor } from "@/db/schema";
 import type { Evidence, MemoryEvent, MemoryItem } from "@/db/schema";
 import { refFor } from "@/lib/memory";
 import type { PlanChange } from "@/services/work/plan";
@@ -27,6 +30,10 @@ export interface ItemDetail extends ItemView {
   /** Where this came from: the saved quote and, for conversations, a link target. */
   provenance: { quote: string | null; conversationId: string | null; conversationTitle: string | null };
   history: Array<Pick<MemoryEvent, "id" | "summary" | "reason" | "actor" | "createdAt" | "undoneAt">>;
+  /** Web sources behind a research finding, with the quote that supports it. */
+  sources: SourceLink[];
+  /** For research findings: the question that was researched. */
+  researchQuestion: string | null;
 }
 
 const parse = (json: string): Record<string, unknown> => {
@@ -76,6 +83,8 @@ export function getItemDetail(db: Db, id: string): ItemDetail | null {
       createdAt: e.createdAt,
     })),
     provenance: { quote: ref.quote ?? null, conversationId: conv?.id ?? null, conversationTitle: conv?.title ?? null },
+    sources: item.kind === "research" ? listSourcesForItem(db, id) : [],
+    researchQuestion: item.kind === "research" ? String((parse(item.data) as { question?: string }).question ?? "") || null : null,
     history: listEventsForEntity(db, "memory_item", id).map((e) => ({
       id: e.id,
       summary: e.summary,
@@ -120,4 +129,68 @@ export function resolveRefs(db: Db, text: string): Record<string, { id: string; 
     if (handles.has(h)) out[h] = { id: i.id, kind: i.kind, title: i.title };
   }
   return out;
+}
+
+export interface ResearchFindingView extends ItemView {
+  question: string;
+  implication: string;
+  sources: Array<{ publisher: string; url: string; title: string; fetchedAt: string }>;
+}
+
+export interface CompetitorView {
+  id: string;
+  company: string;
+  fields: Array<{ key: string; label: string; value: string; sources: Array<{ url: string; publisher: string; quote: string; fetchedAt: string }> }>;
+  lastResearched: string;
+}
+
+export interface ResearchOverview {
+  findings: ResearchFindingView[];
+  competitors: CompetitorView[];
+}
+
+const COMPETITOR_LABELS: Array<[keyof Competitor, string]> = [
+  ["product", "Product"],
+  ["targetCustomer", "Target customer"],
+  ["valueProposition", "Value proposition"],
+  ["pricing", "Pricing"],
+  ["businessModel", "Business model"],
+  ["strengths", "Strengths"],
+  ["weaknesses", "Weaknesses"],
+];
+
+export function researchOverview(db: Db): ResearchOverview {
+  const findings = listItems(db, { kind: "research" }).map((i): ResearchFindingView => {
+    const data = parse(i.data) as { question?: string; implication?: string };
+    return {
+      ...toItemView(db, i),
+      question: data.question ?? "Other",
+      implication: data.implication ?? i.body,
+      sources: listSourcesForItem(db, i.id).map((s) => ({ publisher: s.publisher, url: s.url, title: s.title, fetchedAt: s.fetchedAt })),
+    };
+  });
+  const competitors = listCompetitorRows(db).map((c): CompetitorView => {
+    const fs = parseFieldSources(c);
+    return {
+      id: c.id,
+      company: c.company,
+      lastResearched: c.lastResearched,
+      fields: COMPETITOR_LABELS.flatMap(([key, label]) =>
+        c[key]
+          ? [
+              {
+                key,
+                label,
+                value: String(c[key]),
+                sources: (fs[key as keyof typeof fs] ?? []).flatMap((s) => {
+                  const src = getSourceRow(db, s.sourceId);
+                  return src ? [{ url: src.url, publisher: src.publisher, quote: s.quote, fetchedAt: src.fetchedAt }] : [];
+                }),
+              },
+            ]
+          : [],
+      ),
+    };
+  });
+  return { findings, competitors };
 }

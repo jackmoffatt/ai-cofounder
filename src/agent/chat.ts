@@ -17,8 +17,12 @@ import { AIError, type AIProvider } from "@/services/ai/types";
 import { lastTraceForConversation } from "@/db/queries/context";
 import { refreshBriefIfStale } from "@/services/brief";
 import type { Mode } from "@/lib/modes";
+import type { ToolRegistry } from "@/tools/registry";
+import type { ToolCallRecord, ToolContext } from "@/tools/types";
 import type { StageKey } from "@/lib/profile";
+import { createDefaultRegistry, toolNamesFor } from "@/tools";
 import { buildContext } from "./contextBuilder";
+import { runModelLoop } from "./loop";
 import { planFromReply } from "./planning";
 import { createProposal } from "@/services/memory/proposals";
 import { classifyIntent } from "./intent";
@@ -66,7 +70,7 @@ function errorEvent(err: unknown): TurnEvent {
 }
 
 export async function* runChatTurn(
-  deps: { db: Db; provider: AIProvider },
+  deps: { db: Db; provider: AIProvider; registry?: ToolRegistry; research?: ToolContext["research"] },
   input: TurnInput,
 ): AsyncGenerator<TurnEvent> {
   const { db, provider } = deps;
@@ -107,28 +111,42 @@ export async function* runChatTurn(
   const built = buildContext(db, { conversation, stored, intent });
   if (Object.keys(built.refs).length) yield { type: "context", refs: built.refs };
   const traceId = crypto.randomUUID();
+  const registry = deps.registry ?? createDefaultRegistry();
 
+  const toolNames = toolNamesFor(intent);
   let text = "";
   let meta: Record<string, unknown> = {};
   let usage = { inputTokens: 0, outputTokens: 0 };
   let servedBy = modelFor("chat");
+  let toolRecords: ToolCallRecord[] = [];
+  const refs = { ...built.refs };
   let failure: AIError | null = null;
   try {
-    for await (const ev of provider.stream({
+    for await (const ev of runModelLoop({
+      provider,
+      registry,
+      toolNames,
       model: modelFor("chat"),
       system: built.system,
       messages: built.messages,
       maxTokens: 32000,
       effort: "medium",
       signal: input.signal,
+      toolContext: { db, provider, conversationId: conversation.id, research: deps.research },
     })) {
       if (ev.type === "text_delta") {
         text += ev.text;
         yield { type: "delta", text: ev.text };
+      } else if (ev.type === "status") {
+        yield { type: "status", text: ev.text };
+      } else if (ev.type === "refs") {
+        Object.assign(refs, ev.refs);
+        yield { type: "context", refs: { ...refs } };
       } else {
         usage = ev.usage;
         servedBy = ev.model;
-        meta = { model: ev.model, usage: ev.usage, stopReason: ev.stopReason, refs: built.refs, traceId };
+        toolRecords = ev.tools;
+        meta = { model: ev.model, usage: ev.usage, stopReason: ev.stopReason, refs, traceId };
         if (ev.stopReason === "refusal" && !text) failure = new AIError("refused");
       }
     }
@@ -219,6 +237,7 @@ export async function* runChatTurn(
     context: built.trace,
     memoryEventIds,
     proposalIds,
+    tools: toolRecords,
     model: servedBy,
     tokensIn: usage.inputTokens,
     tokensOut: usage.outputTokens,

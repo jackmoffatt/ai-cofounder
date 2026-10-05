@@ -1,7 +1,7 @@
 import "server-only";
 import { AnthropicProvider } from "./anthropic";
 import { FakeProvider } from "./fake";
-import type { AIProvider, ChatRequest } from "./types";
+import { textOf, type AIProvider, type ChatRequest } from "./types";
 
 export * from "./types";
 export { modelFor, type ModelRole } from "./models";
@@ -12,7 +12,7 @@ export { modelFor, type ModelRole } from "./models";
  *  "we should target <X>", "we are now in validation", "we decided to <X>".
  */
 function fakeExtraction(req: ChatRequest) {
-  const text = /<message>\n([\s\S]*)\n<\/message>/.exec(req.messages[0]?.content ?? "")?.[1] ?? "";
+  const text = /<message>\n([\s\S]*)\n<\/message>/.exec(textOf(req.messages[0]?.content ?? ""))?.[1] ?? "";
   const out = {
     founder: [] as Array<{ field: string; value: string; quote: string }>,
     items: [] as Array<{ kind: string; title: string; details: string; importance: number; quote: string }>,
@@ -45,17 +45,41 @@ function fakeExtraction(req: ChatRequest) {
 /** Routes `structured()` calls in dev mode by what the system prompt says the task is. */
 function fakeStructured(req: ChatRequest) {
   if (req.system.includes("You route one message")) {
-    const text = req.messages[0]?.content ?? "";
+    const text = textOf(req.messages[0]?.content ?? "");
     const recall = /where were we|what did we|why did we|what should i work on/i.test(text);
     const mode = recall ? "REVIEW" : /competitor|market/i.test(text) ? "RESEARCH" : /interview|validate|assumption/i.test(text) ? "VALIDATE" : "DISCOVER";
     const keywords = (text.match(/[a-z]{5,}/gi) ?? []).slice(0, 4).map((w) => w.toLowerCase());
     const wantsPlan = /validate|plan|experiment/i.test(text) && !recall;
-    return { mode, kinds: [], keywords, recall, wantsPlan };
+    const needsResearch = /research|competitor|pricing|market/i.test(text) && !recall;
+    return { mode, kinds: [], keywords, recall, wantsPlan, needsResearch };
   }
   if (req.system.includes("You write the Startup Brief")) {
     return {
       narrative: "## Company\nAn early-stage startup. The founder believes the problem is real; this is untested.\n\n## Where we are\nStill gathering evidence.",
       nextAction: { action: "Interview five target customers", why: "The riskiest assumption has no evidence yet." },
+    };
+  }
+  if (req.system.includes("extract verifiable research findings")) {
+    return {
+      findings: [
+        {
+          claim: "Acme Scheduler's Pro plan costs $8 per user per month billed annually",
+          implication: "A student-focused price under $8 would undercut Acme.",
+          confidence: "high",
+          support: [
+            { source: "S1", quote: "the Pro plan costs $8 per user per month billed annually" },
+            { source: "S2", quote: "The Pro plan costs $8 per user per month when billed annually" },
+          ],
+        },
+        { claim: "Acme Scheduler has 2 million users", implication: "", confidence: "high", support: [{ source: "S1", quote: "Acme Scheduler has two million active users worldwide" }] },
+      ],
+      competitors: [
+        {
+          company: "Acme Scheduler",
+          fields: [{ field: "pricing", value: "Free Starter plan; Pro $8 per user per month billed annually", source: "S1", quote: "The Starter plan is free for up to 3 groups, and the Pro plan costs $8 per user per month billed annually." }],
+        },
+      ],
+      gaps: ["Market size"],
     };
   }
   if (req.system.includes("convert a validation plan")) {
@@ -84,7 +108,7 @@ export function getProvider(): AIProvider {
         provider = new FakeProvider({
           delayMs: 15,
           structuredResult: fakeStructured,
-          completeResult: (r) => (r.system.includes("running summary") ? "Earlier the founder and co-founder discussed the idea." : (r.messages[0]?.content ?? "").split(/\s+/).slice(0, 4).join(" ")),
+          completeResult: (r) => (r.system.includes("running summary") ? "Earlier the founder and co-founder discussed the idea." : textOf(r.messages[0]?.content ?? "").split(/\s+/).slice(0, 4).join(" ")),
         });
         break;
       case "anthropic":

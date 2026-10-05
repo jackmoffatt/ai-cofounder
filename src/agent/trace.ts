@@ -1,5 +1,6 @@
 import type { Db } from "@/db/client";
 import { insertTrace } from "@/db/queries/context";
+import type { ToolCallRecord } from "@/tools/types";
 import type { ContextTrace } from "./contextBuilder";
 
 export interface TraceInput {
@@ -9,6 +10,7 @@ export interface TraceInput {
   context: ContextTrace;
   memoryEventIds: string[];
   proposalIds: string[];
+  tools: ToolCallRecord[];
   model: string;
   tokensIn: number;
   tokensOut: number;
@@ -24,7 +26,7 @@ export function writeTrace(db: Db, t: TraceInput): void {
       messageId: t.messageId,
       mode: t.context.intent.mode,
       context: JSON.stringify(t.context),
-      outputs: JSON.stringify({ memoryEventIds: t.memoryEventIds, proposalIds: t.proposalIds }),
+      outputs: JSON.stringify({ memoryEventIds: t.memoryEventIds, proposalIds: t.proposalIds, tools: t.tools }),
       model: t.model,
       tokensIn: t.tokensIn,
       tokensOut: t.tokensOut,

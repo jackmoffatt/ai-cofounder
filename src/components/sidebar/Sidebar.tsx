@@ -9,7 +9,6 @@ import { IconButton } from "@/components/ui/IconButton";
 import { groupByDay, useConversations, type ConversationSummary } from "@/lib/useConversations";
 import { usePendingProposals } from "@/lib/usePendingProposals";
 
-const sections = ["Research"]; // enabled as their milestones land
 
 function ConversationGroup({
   label,
@@ -116,11 +115,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <NavigationItem onClick={() => open("/decisions")} active={pathname === "/decisions"}>
           Decisions
         </NavigationItem>
-        {sections.map((name) => (
-          <NavigationItem key={name} disabled>
-            {name}
-          </NavigationItem>
-        ))}
+        <NavigationItem onClick={() => open("/research")} active={pathname === "/research"}>
+          Research
+        </NavigationItem>
       </div>
 
       <div className="mt-2 flex items-center justify-between border-t border-line px-1 pt-3">
