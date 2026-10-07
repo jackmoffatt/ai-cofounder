@@ -31,19 +31,23 @@ Just talk. Start with who you are and what you're curious about; there's no form
 - **Researches** when a question needs outside facts. Findings are only kept if their quote is really on the page, and they show their sources. Research is sourced, not validated: you decide whether it counts as evidence.
 - **Keeps a brief** (Startup page) and a recommended next action, rewritten as things change.
 
-Sidebar: **Startup** (company, you, brief), **Memory** (assumptions, decisions, questions, ideas, insights, suggested changes), **Research**, **Tasks**, **Decisions**, **Settings**.
+**Tabs.** Each conversation is a tab under the top bar, like browser tabs: switch instantly, and a tab keeps its draft, scroll position and any reply still streaming. Your open tabs come back after a reload. A new tab shows your most recent conversations, and ⌘K finds older ones.
+
+**Top bar.** **Chat**, **Tasks**, **Memory**, then ⌘K. The **⋯** menu has **Startup** (company, you, brief), **Research**, **Decisions** and **Settings**.
 
 ### Keyboard
 
 | | Mac | Windows / Linux |
 |---|---|---|
-| Command menu (search conversations, jump anywhere) | ⌘K | Ctrl+K |
-| New chat | ⌘⇧O | Ctrl+Shift+O |
-| Hide / show sidebar | ⌘\ | Ctrl+\ |
+| Command menu (search, switch tabs, jump anywhere) | ⌘K | Ctrl+K |
+| New tab | ⌘⇧O | Ctrl+Shift+O |
+| Close tab | ⌥W | Alt+W |
+| Next / previous tab | ⌥] / ⌥[ | Alt+] / Alt+[ |
+| Jump to tab 1–9 | ⌥1–9 | Alt+1–9 |
 | Developer mode (a **Trace** link under each reply) | ⌘⇧D | Ctrl+Shift+D |
 | Close a panel or menu | Esc | Esc |
 
-(Browsers reserve ⌘N / Ctrl+N, so New chat uses ⇧O.)
+(Browsers reserve ⌘N/⌘T/⌘W and Ctrl+N/T/W, so tabs use ⇧O and Alt chords. A desktop build can use the usual ones.)
 
 ## 3. Your data
 

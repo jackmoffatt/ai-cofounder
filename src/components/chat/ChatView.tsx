@@ -1,13 +1,12 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { notifyConversationsChanged, streamChat } from "@/lib/chatClient";
-import { notifyMemoryChanged } from "@/lib/memoryClient";
+import { useEffect, useRef, useState } from "react";
 import { ChatInput } from "@/components/ui/ChatInput";
 import { ContextPanel } from "@/components/context/ContextPanel";
 import { ItemPanel } from "@/components/memory/ItemPanel";
 import { Button } from "@/components/ui/Button";
+import { useChatSession } from "@/lib/useChatSession";
+import { useConversations } from "@/lib/useConversations";
 import { useDebugMode } from "@/lib/useDebugMode";
 import { TracePanel } from "./TracePanel";
 import { Message, type ChatItem } from "./Message";
@@ -22,139 +21,51 @@ const SUGGESTIONS: Array<{ label: string; prompt: string }> = [
 interface Props {
   conversationId: string | null;
   initialMessages: ChatItem[];
+  /** Whether this is the visible tab. Hidden tabs stay mounted so their state survives. */
+  active?: boolean;
   /** Prefills the message box (e.g. from the Research page). */
   initialPrompt?: string;
   /** Something that stops chat from working (e.g. no API key), shown on the empty chat. */
   setupProblem?: string | null;
+  onConversationCreated?: (id: string) => void;
+  onTitle?: (title: string) => void;
+  onSent?: () => void;
+  /** Opens another conversation (from the recent list on an empty tab). */
+  onOpenConversation?: (id: string, title: string) => void;
+  /** A conversation was deleted from the recent list. */
+  onConversationDeleted?: (id: string) => void;
 }
 
-export function ChatView({ conversationId, initialMessages, initialPrompt, setupProblem }: Props) {
-  const router = useRouter();
-  const [items, setItems] = useState<ChatItem[]>(initialMessages);
-  const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+export function ChatView({ conversationId, initialMessages, active = true, initialPrompt, setupProblem, onConversationCreated, onTitle, onSent, onOpenConversation, onConversationDeleted }: Props) {
+  const { items, streaming, error, status, run, stop } = useChatSession({
+    conversationId,
+    initialItems: initialMessages,
+    onConversationCreated,
+    onTitle,
+    onSent,
+  });
   const [panel, setPanel] = useState<{ type: "item" | "trace"; id: string } | null>(null);
   const debug = useDebugMode();
-
-  // Navigating between conversations remounts this component (the route segment changes), so props
-  // only seed state. For a brand-new chat we learn the id mid-stream and adopt it here.
-  const [activeId, setActiveId] = useState<string | null>(conversationId);
-  const abortRef = useRef<AbortController | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  const activeRuns = useRef(0);
-  const pendingNav = useRef<string | null>(null);
-
-  // Stop any in-flight stream when leaving.
-  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el && stick.current) el.scrollTo({ top: el.scrollHeight });
   }, [items]);
 
-  const run = useCallback(
-    async (message: string | undefined) => {
-      setError(null);
-      setStatus(null);
-      setStreaming(true);
-      activeRuns.current++;
-      stick.current = true;
-      const assistantId = `pending-${Date.now()}`;
-      setItems((prev) => [
-        ...prev,
-        ...(message ? [{ id: `u-${Date.now()}`, role: "user" as const, content: message }] : []),
-        { id: assistantId, role: "assistant" as const, content: "" },
-      ]);
-
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
-      let convId = activeId;
-      let failed = false;
-      try {
-        await streamChat(
-          { conversationId: convId ?? undefined, message },
-          (e) => {
-            switch (e.type) {
-              case "meta":
-                if (!convId) {
-                  convId = e.conversationId;
-                  pendingNav.current = convId;
-                  setActiveId(convId);
-                }
-                notifyConversationsChanged();
-                break;
-              case "delta":
-                setItems((prev) =>
-                  prev.map((it) => (it.id === assistantId ? { ...it, content: it.content + e.text } : it)),
-                );
-                break;
-              case "title":
-                notifyConversationsChanged();
-                break;
-              case "context":
-                setItems((prev) => prev.map((it) => (it.id === assistantId ? { ...it, refs: e.refs } : it)));
-                break;
-              case "done":
-                // The reply is complete; memory updates may still follow on this stream.
-                if (activeRuns.current === 1) setStreaming(false);
-                if (e.messageId) setItems((prev) => prev.map((it) => (it.id === assistantId ? { ...it, messageId: e.messageId } : it)));
-                break;
-              case "status":
-                setStatus(e.text);
-                break;
-              case "memory":
-                setItems((prev) => {
-                  const reply = prev.find((it) => it.id === assistantId);
-                  const target = reply?.content ? reply : [...prev].reverse().find((it) => it.role === "user");
-                  const notes = e.changes.map((c) => ({ ...c, undone: false }));
-                  return prev.map((it) => (it === target ? { ...it, notes: [...(it.notes ?? []), ...notes] } : it));
-                });
-                notifyMemoryChanged();
-                break;
-              case "proposals":
-                setItems((prev) => {
-                  const reply = prev.find((it) => it.id === assistantId);
-                  const target = reply?.content ? reply : [...prev].reverse().find((it) => it.role === "user");
-                  return prev.map((it) => (it === target ? { ...it, proposals: [...(it.proposals ?? []), ...e.proposals] } : it));
-                });
-                notifyMemoryChanged();
-                break;
-              case "error":
-                failed = true;
-                setError(e.message);
-                break;
-            }
-          },
-          ctrl.signal,
-        );
-      } catch (err) {
-        if (!(err instanceof DOMException && err.name === "AbortError")) {
-          failed = true;
-          setError("Connection lost. Please try again.");
-        }
-      } finally {
-        // Drop an empty placeholder (failed or stopped before any text arrived).
-        setItems((prev) => prev.filter((it) => it.id !== assistantId || it.content));
-        activeRuns.current--;
-        setStatus(null);
-        setStreaming(activeRuns.current > 0);
-        abortRef.current = null;
-        // Everything is saved by now: move a new chat to its own URL (this remounts onto server data).
-        if (pendingNav.current && !failed && !ctrl.signal.aborted && activeRuns.current === 0) {
-          router.replace(`/c/${pendingNav.current}`);
-          pendingNav.current = null;
-        }
-      }
-    },
-    [activeId, router],
-  );
+  // Coming back to a tab puts the cursor back in its message box.
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && !wasActive.current) rootRef.current?.querySelector("textarea")?.focus({ preventScroll: true });
+    wasActive.current = active;
+  }, [active]);
 
   const landing = items.length === 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col">
       {!landing && (
         <div
           ref={scrollRef}
@@ -203,15 +114,18 @@ export function ChatView({ conversationId, initialMessages, initialPrompt, setup
             autoFocus
             initialValue={initialPrompt}
             streaming={streaming}
-            onStop={() => abortRef.current?.abort()}
-            onSend={(text) => run(text)}
+            onStop={stop}
+            onSend={(text) => {
+              stick.current = true;
+              void run(text);
+            }}
           />
           {landing && (
             <ul className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted">
               {SUGGESTIONS.map((s) => (
                 <li key={s.label}>
                   <button
-                    onClick={() => run(s.prompt)}
+                    onClick={() => void run(s.prompt)}
                     className="transition-colors duration-[var(--dur-fast)] hover:text-fg"
                   >
                     {s.label}
@@ -230,6 +144,7 @@ export function ChatView({ conversationId, initialMessages, initialPrompt, setup
               {error}
             </p>
           )}
+          {landing && active && onOpenConversation && <RecentConversations onOpen={onOpenConversation} onDeleted={onConversationDeleted} />}
         </div>
       </div>
 
@@ -240,5 +155,37 @@ export function ChatView({ conversationId, initialMessages, initialPrompt, setup
         {panel?.type === "trace" && <TracePanel key={panel.id} messageId={panel.id} />}
       </ContextPanel>
     </div>
+  );
+}
+
+/** The few most recent conversations, offered on an empty tab so history stays one click away. */
+function RecentConversations({ onOpen, onDeleted }: { onOpen: (id: string, title: string) => void; onDeleted?: (id: string) => void }) {
+  const { items, remove } = useConversations("");
+  if (items.length === 0) return null;
+  return (
+    <section aria-label="Recent conversations" className="mt-12">
+      <h2 className="mb-1 text-xs font-medium text-muted">Recent</h2>
+      <ul>
+        {items.slice(0, 5).map((c) => (
+          <li key={c.id} className="group flex items-center gap-2">
+            <button
+              onClick={() => onOpen(c.id, c.title)}
+              className="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm transition-colors duration-[var(--dur-fast)] hover:bg-surface-2"
+            >
+              {c.title}
+            </button>
+            <button
+              aria-label={`Delete ${c.title}`}
+              onClick={async () => {
+                if (window.confirm(`Delete "${c.title}"? This can't be undone.`) && (await remove(c.id))) onDeleted?.(c.id);
+              }}
+              className="rounded-md px-2 py-1 text-xs text-muted opacity-0 transition-opacity hover:text-fg focus-visible:opacity-100 group-hover:opacity-100"
+            >
+              Delete
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

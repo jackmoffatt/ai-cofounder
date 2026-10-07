@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { ACCENTS, useAccent } from "@/lib/accent";
 import { notifyConversationsChanged } from "@/lib/chatClient";
 import { api, notifyMemoryChanged, timeAgo } from "@/lib/memoryClient";
-import { SHORTCUTS, useIsMac } from "@/lib/platform";
+import { SHORTCUTS, formatShortcut, useIsMac } from "@/lib/platform";
 import type { ThemePreference } from "@/lib/theme";
 import { setDebugMode, useDebugMode } from "@/lib/useDebugMode";
 import { useTheme } from "@/lib/useTheme";
@@ -267,7 +267,7 @@ export function SettingsPage({ initialHealth, initialTrash }: { initialHealth: H
             {SHORTCUTS.map((s) => (
               <li key={s.label} className="flex items-baseline justify-between gap-4 text-sm">
                 <span>{s.label}</span>
-                <kbd className="shrink-0 rounded-sm bg-surface-2 px-1.5 py-0.5 text-xs text-muted">{s.mod ? `${mac ? "⌘" : "Ctrl+"}${s.keys}` : s.keys}</kbd>
+                <kbd className="shrink-0 rounded-sm bg-surface-2 px-1.5 py-0.5 text-xs text-muted">{formatShortcut(s, mac)}</kbd>
               </li>
             ))}
           </ul>

@@ -1,32 +1,42 @@
 "use client";
 
-import { PanelLeft } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { useIsMac } from "@/lib/platform";
+import { WorkspaceProvider, useWorkspace } from "@/components/workspace/WorkspaceProvider";
+import { WorkspaceView } from "@/components/workspace/WorkspaceView";
 import { CommandMenu } from "./CommandMenu";
-import { Sidebar } from "@/components/sidebar/Sidebar";
-import { IconButton } from "@/components/ui/IconButton";
+import { TopBar } from "./TopBar";
 import { TooltipProvider } from "@/components/ui/Tooltip";
 import { cn } from "@/lib/cn";
-import { toggleDebugMode, useDebugMode } from "@/lib/useDebugMode";
+import { toggleDebugMode } from "@/lib/useDebugMode";
 
-/** Sidebar + main area. On narrow screens the sidebar becomes an overlay drawer. */
-export function AppShell({ children }: { children: ReactNode }) {
-  // Separate state per breakpoint: sidebar starts open on desktop, closed as a drawer on mobile.
-  const [desktopOpen, setDesktopOpen] = useState(true);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const debug = useDebugMode();
-  const router = useRouter();
-  const mac = useIsMac();
+/** Top bar, the chat workspace (tabs), and whichever other page is open. */
+export function AppShell({ children, setupProblem }: { children: ReactNode; setupProblem: string | null }) {
+  return (
+    <TooltipProvider>
+      <WorkspaceProvider setupProblem={setupProblem}>
+        <Shell>{children}</Shell>
+      </WorkspaceProvider>
+    </TooltipProvider>
+  );
+}
+
+function Shell({ children }: { children: ReactNode }) {
+  const ws = useWorkspace();
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const toggle = () => {
-    setDesktopOpen((o) => !o);
-    setMobileOpen((o) => !o);
-  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Alt chords use e.code: on a Mac, Option+W types "∑", so e.key is no use.
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && ws.onChatRoute) {
+        const digit = /^Digit([1-9])$/.exec(e.code);
+        if (e.code === "KeyW") ws.close();
+        else if (e.code === "BracketRight") ws.step(1);
+        else if (e.code === "BracketLeft") ws.step(-1);
+        else if (digit) ws.jump(Number(digit[1]));
+        else return;
+        e.preventDefault();
+        return;
+      }
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       const key = e.key.toLowerCase();
       if (key === "k" && !e.shiftKey) {
@@ -34,11 +44,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         setPaletteOpen((o) => !o);
       } else if (key === "o" && e.shiftKey) {
         e.preventDefault();
-        router.push("/");
-      } else if (key === "\\" && !e.shiftKey) {
-        e.preventDefault();
-        setDesktopOpen((o) => !o);
-        setMobileOpen((o) => !o);
+        ws.newTab();
       } else if (key === "d" && e.shiftKey) {
         e.preventDefault();
         toggleDebugMode();
@@ -46,45 +52,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [router]);
+  }, [ws]);
 
   return (
-    <TooltipProvider>
-      <div className="flex h-dvh overflow-hidden">
-        <aside
-          className={cn(
-            "fixed inset-y-0 left-0 z-30 w-64 shrink-0 overflow-hidden bg-surface shadow-lg md:static md:bg-surface-2/60 md:shadow-none",
-            "transition-[width,transform,visibility] duration-[var(--dur-base)] ease-out",
-            !mobileOpen && "max-md:invisible max-md:-translate-x-full",
-            !desktopOpen && "md:invisible md:w-0",
-          )}
-        >
-          <Sidebar onNavigate={() => setMobileOpen(false)} />
-        </aside>
-
-        {mobileOpen && (
-          <button
-            aria-label="Close sidebar"
-            className="fixed inset-0 z-20 bg-black/20 md:hidden"
-            onClick={() => setMobileOpen(false)}
-          />
-        )}
-
-        <main className="relative flex min-w-0 flex-1 flex-col">
-          <div className="absolute left-3 top-3 z-10">
-            <IconButton label="Toggle sidebar" onClick={toggle}>
-              <PanelLeft size={16} />
-            </IconButton>
-          </div>
-          {debug && (
-            <span className="absolute right-3 top-3 z-10 rounded-sm bg-surface-2 px-2 py-0.5 text-xs text-muted" title="Developer mode (Ctrl/Cmd+Shift+D to turn off)">
-              Debug
-            </span>
-          )}
-          {children}
-        </main>
-        <CommandMenu open={paletteOpen} onOpenChange={setPaletteOpen} shortcutHint={{ newChat: mac ? "⌘⇧O" : "Ctrl+Shift+O", sidebar: mac ? "⌘\\" : "Ctrl+\\" }} />
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <TopBar onOpenPalette={() => setPaletteOpen(true)} />
+      <div className="relative min-h-0 flex-1">
+        <WorkspaceView />
+        <main className={cn("relative flex h-full min-w-0 flex-col", ws.onChatRoute && "hidden")}>{children}</main>
       </div>
-    </TooltipProvider>
+      <CommandMenu open={paletteOpen} onOpenChange={setPaletteOpen} />
+    </div>
   );
 }
