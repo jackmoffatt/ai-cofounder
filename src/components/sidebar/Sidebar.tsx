@@ -121,7 +121,13 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <div className="mt-2 flex items-center justify-between border-t border-line px-1 pt-3">
-        <span className="px-2 text-sm text-muted">Settings</span>
+        <button
+          onClick={() => open("/settings")}
+          aria-current={pathname === "/settings" ? "page" : undefined}
+          className={`flex h-8 items-center rounded-md px-3 text-sm transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 hover:text-fg ${pathname === "/settings" ? "bg-surface-2 text-fg" : "text-muted"}`}
+        >
+          Settings
+        </button>
         <ThemeToggle />
       </div>
     </nav>

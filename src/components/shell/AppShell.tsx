@@ -1,7 +1,10 @@
 "use client";
 
 import { PanelLeft } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { useIsMac } from "@/lib/platform";
+import { CommandMenu } from "./CommandMenu";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { IconButton } from "@/components/ui/IconButton";
 import { TooltipProvider } from "@/components/ui/Tooltip";
@@ -14,20 +17,36 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [desktopOpen, setDesktopOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const debug = useDebugMode();
+  const router = useRouter();
+  const mac = useIsMac();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const toggle = () => {
+    setDesktopOpen((o) => !o);
+    setMobileOpen((o) => !o);
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "d") {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === "k" && !e.shiftKey) {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      } else if (key === "o" && e.shiftKey) {
+        e.preventDefault();
+        router.push("/");
+      } else if (key === "\\" && !e.shiftKey) {
+        e.preventDefault();
+        setDesktopOpen((o) => !o);
+        setMobileOpen((o) => !o);
+      } else if (key === "d" && e.shiftKey) {
         e.preventDefault();
         toggleDebugMode();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
-  const toggle = () => {
-    setDesktopOpen((o) => !o);
-    setMobileOpen((o) => !o);
-  };
+  }, [router]);
 
   return (
     <TooltipProvider>
@@ -64,6 +83,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
           {children}
         </main>
+        <CommandMenu open={paletteOpen} onOpenChange={setPaletteOpen} shortcutHint={{ newChat: mac ? "⌘⇧O" : "Ctrl+Shift+O", sidebar: mac ? "⌘\\" : "Ctrl+\\" }} />
       </div>
     </TooltipProvider>
   );

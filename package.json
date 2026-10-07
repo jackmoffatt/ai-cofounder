@@ -9,10 +9,12 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "eval": "node --env-file-if-exists=.env.local ./node_modules/vitest/vitest.mjs run --config vitest.eval.config.mts"
+    "eval": "node --env-file-if-exists=.env.local ./node_modules/vitest/vitest.mjs run --config vitest.eval.config.mts",
+    "backup": "node --env-file-if-exists=.env.local scripts/backup.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
+    "@radix-ui/react-dialog": "^1.2.0",
     "@radix-ui/react-tooltip": "^1.2.16",
     "better-sqlite3": "^13.0.3",
     "cheerio": "^1.2.0",

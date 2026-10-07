@@ -4,6 +4,7 @@ import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3"
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import fs from "node:fs";
 import path from "node:path";
+import { loadModelOverrides } from "@/services/settings";
 import * as schema from "./schema";
 
 export type Db = BetterSQLite3Database<typeof schema>;
@@ -28,6 +29,7 @@ export function getDb(): Db {
   if (!globalForDb.__db) {
     const file = process.env.DATABASE_PATH ?? path.join(process.cwd(), "data", "app.db");
     globalForDb.__db = createDb(file);
+    loadModelOverrides(globalForDb.__db);
   }
   return globalForDb.__db;
 }

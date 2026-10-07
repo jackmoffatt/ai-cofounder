@@ -6,6 +6,7 @@ import { getConversation, listMessages } from "@/db/queries/conversations";
 import { getProposalRows } from "@/db/queries/memory";
 import { getEvents } from "@/db/queries/profile";
 import { toCard } from "@/services/memory/view";
+import { setupProblem } from "@/services/health";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
  *  stays mounted when a new conversation gets its id mid-stream. */
 export default async function Page({ params, searchParams }: { params: Promise<{ slug?: string[] }>; searchParams: Promise<{ ask?: string }> }) {
   const { slug } = await params;
-  if (!slug) return <ChatView conversationId={null} initialMessages={[]} initialPrompt={(await searchParams).ask?.slice(0, 500)} />;
+  if (!slug) return <ChatView conversationId={null} initialMessages={[]} initialPrompt={(await searchParams).ask?.slice(0, 500)} setupProblem={setupProblem()} />;
 
   const id = slug.length === 2 && slug[0] === "c" ? z.uuid().safeParse(slug[1]) : null;
   if (!id?.success) notFound();

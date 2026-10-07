@@ -359,3 +359,12 @@ export const approvals = sqliteTable("approvals", {
 export type Source = typeof sources.$inferSelect;
 export type Competitor = typeof competitors.$inferSelect;
 export type Approval = typeof approvals.$inferSelect;
+
+/** Small key/value settings (model overrides). Never holds secrets: API keys live only in the environment. */
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type Setting = typeof settings.$inferSelect;

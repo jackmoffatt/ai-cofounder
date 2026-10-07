@@ -426,3 +426,26 @@ Things that can safely wait: search vendor, accent color, exact model IDs, brief
 | **Provider dependence** | Lock-in | Provider interface + role→model config; keep provider-specific features out of core paths |
 | **Data loss (single SQLite file)** | Company memory is valuable | WAL, export in V1, simple backup script, soft deletes |
 | **Local app exposure** | Browser-based attacks on localhost | Origin/Host checks, localhost binding |
+
+
+---
+
+## Implementation status (as built)
+
+All seven milestones are implemented. How the build differs from this plan:
+
+| Plan | As built | Why |
+|---|---|---|
+| Post-turn extraction **plus** a `create_task` tool (M5) | Tasks, status updates and plans come from the post-turn extraction pipeline; no `create_task` tool | Simpler and testable; plans arrive as one card the founder accepts |
+| Tool registry in M5 | Introduced in M6 with `web_research` and `search_memory` | Research is the first thing that genuinely needs an in-turn tool loop |
+| Research search vendor decided at M6 | `SearchBackend` interface; Anthropic hosted search (default, no extra key) and Brave | Zero extra setup for the default; the interface keeps the choice open |
+| Founder facts "proposal-confirmed" | Founder facts save automatically, visibly, with Undo; **startup/strategic changes** are proposals | Low-risk personal facts vs company direction |
+| Memory items table including research | `research` is a kind in `memory_items`; sources and competitors in their own tables | As planned in D, with `research_sources` linking findings to quotes |
+| Agent modes internal only | Classifier picks the mode per message; shown only in the debug trace | As planned |
+| `⌘N` new chat | `⌘⇧O`, plus a command menu on `⌘K` | Browsers reserve ⌘N |
+| Embeddings | Not built; FTS5 keyword search plus per-mode recipes | As planned; revisit when volume demands |
+| Approvals UI | The gate and `approvals` table exist; no UI | No external-risk tool exists yet |
+
+Additions beyond the plan: evals (`npm run eval`) for the fact-vs-assumption, routing, brief-honesty, task, plan and research rules; per-reply traces; a trash with restore and erase; accent presets; `npm run backup`.
+
+Not built, by decision: multi-agent orchestration, customer-facing AI, integrations (email, calendar, GitHub), billing, auth, mobile-specific UI. See section "Do NOT build yet" of the original spec.

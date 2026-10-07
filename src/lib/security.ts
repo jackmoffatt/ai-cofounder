@@ -20,3 +20,20 @@ export function rejectCrossOrigin(req: Request): Response | null {
 function forbidden() {
   return Response.json({ error: "Forbidden" }, { status: 403 });
 }
+
+/**
+ * Hosts this local app answers to. A page on another website can't read this app's responses directly,
+ * but with DNS rebinding it can make its own domain resolve to 127.0.0.1 and then both the Origin and
+ * the Host it sends are its own. Refusing any Host that isn't a loopback name closes that route.
+ * Add names (e.g. a tailnet hostname) with ALLOWED_HOSTS="name1,name2".
+ */
+export function isAllowedHost(hostHeader: string | null, extra: string = process.env.ALLOWED_HOSTS ?? ""): boolean {
+  if (!hostHeader) return false;
+  const host = hostHeader.toLowerCase().replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+  return extra
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(host);
+}

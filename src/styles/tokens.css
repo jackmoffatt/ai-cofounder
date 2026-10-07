@@ -70,3 +70,13 @@
     --dur-slow: 0ms;
   }
 }
+
+/* Accent presets. Chosen in Settings; the default (no attribute) is blue. */
+:root[data-accent="green"] { --accent: #2f7d5b; }
+:root[data-accent="violet"] { --accent: #6b57c4; }
+:root[data-accent="orange"] { --accent: #b85a17; }
+:root[data-accent="graphite"] { --accent: #3a3a3c; }
+:root[data-theme="dark"][data-accent="green"] { --accent: #6fcf9f; }
+:root[data-theme="dark"][data-accent="violet"] { --accent: #a99bf0; }
+:root[data-theme="dark"][data-accent="orange"] { --accent: #f0a468; }
+:root[data-theme="dark"][data-accent="graphite"] { --accent: #d0d0d4; }

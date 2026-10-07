@@ -24,9 +24,11 @@ interface Props {
   initialMessages: ChatItem[];
   /** Prefills the message box (e.g. from the Research page). */
   initialPrompt?: string;
+  /** Something that stops chat from working (e.g. no API key), shown on the empty chat. */
+  setupProblem?: string | null;
 }
 
-export function ChatView({ conversationId, initialMessages, initialPrompt }: Props) {
+export function ChatView({ conversationId, initialMessages, initialPrompt, setupProblem }: Props) {
   const router = useRouter();
   const [items, setItems] = useState<ChatItem[]>(initialMessages);
   const [streaming, setStreaming] = useState(false);
@@ -217,6 +219,11 @@ export function ChatView({ conversationId, initialMessages, initialPrompt }: Pro
                 </li>
               ))}
             </ul>
+          )}
+          {landing && setupProblem && !error && (
+            <p role="status" className="mt-4 text-sm text-muted">
+              {setupProblem}
+            </p>
           )}
           {landing && error && (
             <p role="alert" className="mt-4 text-sm text-muted">
